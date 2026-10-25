@@ -1,0 +1,110 @@
+{% extends 'inventory/base.html' %}
+{% block title %}System tools{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h2 class="mb-3"><i class="bi bi-gear"></i> System tools</h2>
+  <div class="row g-3">
+    <div class="col-lg-6">
+      <div class="card shadow-sm border-0">
+        <div class="card-header bg-primary text-white">Theme & shop</div>
+        <div class="card-body">
+          <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="save_settings">
+            <div class="mb-2">
+              <label class="form-label">Shop name</label>
+              <input name="shop_name" class="form-control" value="{{ cfg.shop_name }}">
+            </div>
+            <div class="mb-2">
+              <label class="form-label">Theme</label>
+              <select name="theme" class="form-select">
+                {% for v,l in themes %}
+                  <option value="{{ v }}" {% if cfg.theme == v %}selected{% endif %}>{{ l }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" name="backup_enabled" value="1" id="be" {% if cfg.backup_enabled %}checked{% endif %}>
+              <label class="form-check-label" for="be">Auto backup schedule</label>
+            </div>
+            <div class="row g-2 mb-2">
+              <div class="col">
+                <label class="form-label">Interval (hours)</label>
+                <input type="number" min="1" name="backup_interval_hours" class="form-control" value="{{ cfg.backup_interval_hours }}">
+              </div>
+              <div class="col">
+                <label class="form-label">Keep last N</label>
+                <input type="number" min="1" name="backup_keep_count" class="form-control" value="{{ cfg.backup_keep_count }}">
+              </div>
+            </div>
+            <p class="small text-muted">Last auto: {{ cfg.last_auto_backup_at|default:"never" }}</p>
+            <button class="btn btn-primary">Save settings</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-6">
+      <div class="card shadow-sm border-0 mb-3">
+        <div class="card-header bg-success text-white">Local backup</div>
+        <div class="card-body">
+          <form method="post" class="mb-3">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="backup_now">
+            <button class="btn btn-success">Backup now</button>
+          </form>
+          <p class="small">Copies SQLite DB into <code>backups/</code> folder on this PC.</p>
+          <table class="table table-sm">
+            <thead><tr><th>File</th><th>KB</th></tr></thead>
+            <tbody>
+            {% for b in backups %}
+              <tr><td class="small">{{ b.name }}</td><td>{{ b.size_kb }}</td></tr>
+            {% empty %}<tr><td colspan="2">No backups yet</td></tr>{% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card shadow-sm border-0 border-warning">
+        <div class="card-header bg-warning">Restore</div>
+        <div class="card-body">
+          <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="restore">
+            <select name="backup_file" class="form-select mb-2" required>
+              <option value="">Select backup…</option>
+              {% for b in backups %}<option value="{{ b.name }}">{{ b.name }}</option>{% endfor %}
+            </select>
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" name="confirm_restore" value="1" id="cr">
+              <label class="form-check-label" for="cr">I understand current DB will be replaced</label>
+            </div>
+            <button class="btn btn-warning" onclick="return confirm('Restore this backup?');">Restore</button>
+          </form>
+        </div>
+      </div>
+    </div>
+    <div class="col-12">
+      <div class="card shadow-sm border-danger">
+        <div class="card-header bg-danger text-white">Factory reset</div>
+        <div class="card-body">
+          <p class="text-danger">Deletes sales, credit, cashbook, shifts, messages. Superuser only.</p>
+          <form method="post" class="row g-2 align-items-end">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="reset_demo">
+            <div class="col-md-3">
+              <label class="form-label">Type RESET</label>
+              <input name="confirm_reset" class="form-control" placeholder="RESET" autocomplete="off">
+            </div>
+            <div class="col-md-3 form-check mt-4">
+              <input class="form-check-input" type="checkbox" name="keep_catalog" value="1" id="kc" checked>
+              <label class="form-check-label" for="kc">Keep product catalog (qty → 0)</label>
+            </div>
+            <div class="col-md-3">
+              <button class="btn btn-outline-danger">Reset transactional data</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
