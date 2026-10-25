@@ -1,0 +1,23 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Invoices{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h2>Sale invoices</h2>
+  <table class="table table-sm table-striped">
+    <thead><tr><th>Bill</th><th>When</th><th>Total</th><th>Paid</th><th>Credit</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for i in invoices %}
+      <tr class="{% if i.is_void %}table-secondary{% endif %}">
+        <td><a href="{% url 'receipt_view' i.bill_number %}">{{ i.bill_number }}</a></td>
+        <td>{{ i.created_at|date:"Y-m-d H:i" }}</td>
+        <td>{{ currency }}{{ i.total }}</td>
+        <td>{{ currency }}{{ i.amount_paid }}</td>
+        <td>{{ currency }}{{ i.amount_on_credit }}</td>
+        <td>{% if i.is_void %}<span class="badge bg-danger">VOID</span>{% else %}OK{% endif %}</td>
+        <td>{% if not i.is_void %}<a href="{% url 'invoice_void' i.bill_number %}">Void</a>{% endif %}</td>
+      </tr>
+    {% empty %}<tr><td colspan="7">No invoices yet — complete a POS sale</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
