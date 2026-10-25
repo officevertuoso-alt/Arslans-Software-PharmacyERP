@@ -871,3 +871,35 @@ class MessageLog(models.Model):
 
     def __str__(self):
         return f'{self.channel} {self.to_phone} {self.status}'
+
+
+
+class AppSettings(models.Model):
+    """Singleton-style app preferences (theme, backup schedule)."""
+    THEME_LIGHT = 'light'
+    THEME_DARK = 'dark'
+    THEME_PHARMACY = 'pharmacy'
+    THEME_CHOICES = [
+        (THEME_LIGHT, 'Light'),
+        (THEME_DARK, 'Dark'),
+        (THEME_PHARMACY, 'Pharmacy green'),
+    ]
+    theme = models.CharField(max_length=20, choices=THEME_CHOICES, default=THEME_PHARMACY)
+    backup_enabled = models.BooleanField(default=True)
+    backup_interval_hours = models.PositiveIntegerField(default=24)
+    backup_keep_count = models.PositiveIntegerField(default=14)
+    last_auto_backup_at = models.DateTimeField(null=True, blank=True)
+    shop_name = models.CharField(max_length=120, default="Arslan's Software Pharmacy")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self):
+        return 'App settings'
