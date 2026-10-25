@@ -721,3 +721,120 @@ class PosShift(models.Model):
 
     def __str__(self):
         return f'Shift {self.id} {self.user.username} ({self.status})'
+
+
+
+class CustomerParty(models.Model):
+    """Walk-in / credit customer (not necessarily a login user)."""
+    name = models.CharField(max_length=120, db_index=True)
+    phone = models.CharField(max_length=20, blank=True, db_index=True)
+    address = models.CharField(max_length=255, blank=True)
+    balance = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    credit_limit = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('50000.00'))
+    notes = models.CharField(max_length=255, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['name']
+        verbose_name_plural = 'Customer parties'
+
+    def __str__(self):
+        return f'{self.name} ({self.phone})'
+
+    @property
+    def available_credit(self):
+        return max(Decimal('0.00'), (self.credit_limit - self.balance).quantize(Decimal('0.01')))
+
+
+class SaleInvoice(models.Model):
+    """One multi-line POS bill header."""
+    bill_number = models.CharField(max_length=32, unique=True, db_index=True)
+    customer_user = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='sale_invoices'
+    )
+    customer_party = models.ForeignKey(
+        CustomerParty, on_delete=models.SET_NULL, null=True, blank=True, related_name='invoices'
+    )
+    walk_in_name = models.CharField(max_length=120, blank=True)
+    walk_in_phone = models.CharField(max_length=20, blank=True)
+    subtotal = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
+    discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    total = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
+    amount_paid = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
+    amount_on_credit = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
+    payment_method = models.CharField(max_length=12, blank=True)
+    is_void = models.BooleanField(default=False)
+    void_reason = models.CharField(max_length=255, blank=True)
+    voided_at = models.DateTimeField(null=True, blank=True)
+    voided_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='voided_invoices'
+    )
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='created_invoices'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    shift = models.ForeignKey(
+        'PosShift', on_delete=models.SET_NULL, null=True, blank=True, related_name='invoices'
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.bill_number
+
+
+class AuditLog(models.Model):
+    action = models.CharField(max_length=64)
+    detail = models.TextField(blank=True)
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class SupplierReturn(models.Model):
+    supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE, related_name='returns')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='supplier_returns')
+    batch = models.ForeignKey(
+        'ProductBatch', on_delete=models.SET_NULL, null=True, blank=True, related_name='supplier_returns'
+    )
+    quantity = models.PositiveIntegerField()
+    unit_cost = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
+    reason = models.CharField(max_length=255, blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class PurchaseOrder(models.Model):
+    STATUS_DRAFT = 'draft'
+    STATUS_ORDERED = 'ordered'
+    STATUS_RECEIVED = 'received'
+    STATUS_CANCELLED = 'cancelled'
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, 'Draft'),
+        (STATUS_ORDERED, 'Ordered'),
+        (STATUS_RECEIVED, 'Received'),
+        (STATUS_CANCELLED, 'Cancelled'),
+    ]
+    supplier = models.ForeignKey(Supplier, on_delete=models.SET_NULL, null=True, blank=True, related_name='purchase_orders')
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_DRAFT)
+    notes = models.CharField(max_length=255, blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class PurchaseOrderLine(models.Model):
+    order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name='lines')
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    quantity = models.PositiveIntegerField(default=1)
+    notes = models.CharField(max_length=120, blank=True)
