@@ -1,5 +1,5 @@
 from django.shortcuts import render, get_object_or_404, redirect
-from .models import Product, Purchase, Supplier, Return
+from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment
 from datetime import timedelta
 from django.utils import timezone
 from django.contrib import messages
@@ -167,65 +167,143 @@ def purchase_product(request, pk):
 
 @login_required
 def checkout(request):
+    """
+    Complete a sale with cash / partial payment / full credit (udhaar).
+    All money and stock updates run inside a single atomic transaction.
+    """
     purchase_info = request.session.get('purchase_info')
     if not purchase_info:
         messages.error(request, "No purchase information found. Please select a product first.")
         return redirect('customer_product_list')
 
     product = get_object_or_404(Product, pk=purchase_info['product_id'])
-    quantity = purchase_info['quantity']
-    total_cost = float(purchase_info['total_cost'])
+    quantity = int(purchase_info['quantity'])
+    try:
+        total_cost = Decimal(purchase_info['total_cost']).quantize(Decimal('0.01'))
+    except (InvalidOperation, TypeError, ValueError):
+        messages.error(request, "Invalid cart total. Please try again.")
+        del request.session['purchase_info']
+        return redirect('customer_product_list')
+
+    profile, _ = CustomerProfile.objects.get_or_create(user=request.user)
 
     if request.method == 'POST':
         try:
-            payment_amount = float(request.POST.get('payment_amount'))
-        except (ValueError, TypeError):
+            payment_amount = Decimal(str(request.POST.get('payment_amount', '0') or '0')).quantize(Decimal('0.01'))
+        except (InvalidOperation, TypeError, ValueError):
             messages.error(request, "Invalid payment amount.")
             return render(request, 'inventory/checkout.html', {
                 'product': product,
                 'quantity': quantity,
                 'total_cost': total_cost,
-                'change': None
+                'currency': CURRENCY_SYMBOL,
+                'profile': profile,
+                'change': None,
             })
 
-        if payment_amount < total_cost:
-            messages.error(request, "Payment amount is less than the total cost.")
+        if payment_amount < 0:
+            messages.error(request, "Payment amount cannot be negative.")
             return render(request, 'inventory/checkout.html', {
                 'product': product,
                 'quantity': quantity,
                 'total_cost': total_cost,
-                'change': None
+                'currency': CURRENCY_SYMBOL,
+                'profile': profile,
+                'change': None,
             })
-        else:
-            change = payment_amount - total_cost
-            # Deduct stock here
-            if product.quantity >= quantity:
-                product.quantity -= quantity
-                product.save()
 
-                # Create a Purchase record
-                from .models import Purchase # Import here to avoid circular dependency if Product is not yet defined
+        credit_needed = (total_cost - payment_amount).quantize(Decimal('0.01'))
+        if credit_needed < 0:
+            credit_needed = Decimal('0.00')
+            change = (payment_amount - total_cost).quantize(Decimal('0.01'))
+            amount_paid = total_cost
+        else:
+            change = Decimal('0.00')
+            amount_paid = payment_amount
+
+        if credit_needed > 0 and not profile.can_take_credit(credit_needed):
+            messages.error(
+                request,
+                f"Credit limit exceeded. Available credit: {CURRENCY_SYMBOL}{profile.available_credit}. "
+                f"Outstanding balance: {CURRENCY_SYMBOL}{profile.balance}."
+            )
+            return render(request, 'inventory/checkout.html', {
+                'product': product,
+                'quantity': quantity,
+                'total_cost': total_cost,
+                'currency': CURRENCY_SYMBOL,
+                'profile': profile,
+                'change': None,
+            })
+
+        if credit_needed == 0:
+            payment_method = Purchase.PAYMENT_CASH if amount_paid > 0 else Purchase.PAYMENT_CASH
+        elif amount_paid == 0:
+            payment_method = Purchase.PAYMENT_CREDIT
+        else:
+            payment_method = Purchase.PAYMENT_SPLIT
+
+        try:
+            with transaction.atomic():
+                product = Product.objects.select_for_update().get(pk=product.pk)
+                if product.quantity < quantity:
+                    raise ValueError(
+                        f"Not enough {product.name} in stock. Available: {product.quantity}."
+                    )
+                if product.is_expired():
+                    raise ValueError(f"{product.name} is expired and cannot be sold.")
+
+                product.quantity -= quantity
+                product.save(update_fields=['quantity'])
+
                 Purchase.objects.create(
                     product=product,
                     customer=request.user,
                     quantity=quantity,
-                    total_price=total_cost
+                    total_price=total_cost,
+                    amount_paid=amount_paid,
+                    amount_on_credit=credit_needed,
+                    payment_method=payment_method,
                 )
 
-                messages.success(request, f"Purchase successful! Your change is ₱{change:.2f}.")
-                del request.session['purchase_info'] # Clear session data
-                return redirect('customer_product_list')
-            else:
-                messages.error(request, f"Not enough {product.name} in stock. Available: {product.quantity}.")
-                del request.session['purchase_info'] # Clear session data
-                return redirect('customer_product_list')
+                if credit_needed > 0:
+                    profile = CustomerProfile.objects.select_for_update().get(user=request.user)
+                    profile.balance = (profile.balance + credit_needed).quantize(Decimal('0.01'))
+                    profile.save(update_fields=['balance', 'updated_at'])
+        except ValueError as exc:
+            messages.error(request, str(exc))
+            if 'purchase_info' in request.session:
+                del request.session['purchase_info']
+            return redirect('customer_product_list')
+        except Exception:
+            messages.error(request, "Sale could not be completed. Please try again.")
+            return redirect('customer_product_list')
+
+        if credit_needed > 0 and change == 0:
+            msg = (
+                f"Sale successful. Paid {CURRENCY_SYMBOL}{amount_paid}, "
+                f"on credit (udhaar) {CURRENCY_SYMBOL}{credit_needed}. "
+                f"New balance: {CURRENCY_SYMBOL}{(profile.balance)}."
+            )
+        elif change > 0:
+            msg = f"Purchase successful! Your change is {CURRENCY_SYMBOL}{change}."
+        else:
+            msg = f"Purchase successful! Paid {CURRENCY_SYMBOL}{amount_paid}."
+
+        messages.success(request, msg)
+        if 'purchase_info' in request.session:
+            del request.session['purchase_info']
+        return redirect('customer_product_list')
 
     return render(request, 'inventory/checkout.html', {
         'product': product,
         'quantity': quantity,
         'total_cost': total_cost,
-        'change': None
+        'currency': CURRENCY_SYMBOL,
+        'profile': profile,
+        'change': None,
     })
+
 
 @admin_required
 def supplier_list(request):
@@ -322,3 +400,129 @@ def view_barcode(request, pk):
     response = HttpResponse(content_type='image/png')
     ean.write(response)
     return response
+
+@admin_required
+def process_return(request, pk, status):
+    if status not in ["Approved", "Rejected"]:
+        messages.error(request, "Invalid status.")
+        return redirect('manage_returns')
+
+    try:
+        with transaction.atomic():
+            return_request = Return.objects.select_for_update().get(pk=pk)
+            if return_request.status != "Pending":
+                messages.error(request, "This return has already been processed.")
+                return redirect('manage_returns')
+
+            return_request.status = status
+            if status == "Approved":
+                product = Product.objects.select_for_update().get(pk=return_request.product_id)
+                product.quantity += return_request.quantity
+                product.save(update_fields=['quantity'])
+            return_request.save(update_fields=['status'])
+        messages.success(request, f"Return request {status.lower()}.")
+    except Exception:
+        messages.error(request, "Could not process return. Please try again.")
+    return redirect('manage_returns')
+
+
+def view_barcode(request, pk):
+    product = get_object_or_404(Product, pk=pk)
+    EAN = barcode.get_barcode_class('ean13')
+    ean = EAN(f'{product.pk:012d}', writer=ImageWriter())
+    response = HttpResponse(content_type='image/png')
+    ean.write(response)
+    return response
+
+
+@login_required
+def my_ledger(request):
+    """Customer views their own sales and outstanding balance."""
+    profile, _ = CustomerProfile.objects.get_or_create(user=request.user)
+    sales = Purchase.objects.filter(customer=request.user).select_related('product')[:50]
+    payments = CustomerPayment.objects.filter(customer=request.user)[:30]
+    return render(request, 'inventory/my_ledger.html', {
+        'profile': profile,
+        'sales': sales,
+        'payments': payments,
+        'currency': CURRENCY_SYMBOL,
+    })
+
+
+@admin_required
+def customer_ledger_list(request):
+    """Staff: list all customers with outstanding balances."""
+    profiles = (
+        CustomerProfile.objects.select_related('user')
+        .order_by('-balance', 'user__username')
+    )
+    return render(request, 'inventory/customer_ledger_list.html', {
+        'profiles': profiles,
+        'currency': CURRENCY_SYMBOL,
+    })
+
+
+@admin_required
+def customer_ledger_detail(request, user_id):
+    """Staff: one customer ledger + record payment against udhaar."""
+    customer = get_object_or_404(User, pk=user_id)
+    profile, _ = CustomerProfile.objects.get_or_create(user=customer)
+    sales = Purchase.objects.filter(customer=customer).select_related('product')[:50]
+    payments = CustomerPayment.objects.filter(customer=customer)[:30]
+
+    if request.method == 'POST':
+        try:
+            amount = Decimal(str(request.POST.get('amount', '0'))).quantize(Decimal('0.01'))
+        except (InvalidOperation, TypeError, ValueError):
+            messages.error(request, "Invalid amount.")
+            return redirect('customer_ledger_detail', user_id=user_id)
+
+        if amount <= 0:
+            messages.error(request, "Payment amount must be greater than zero.")
+            return redirect('customer_ledger_detail', user_id=user_id)
+
+        method = request.POST.get('payment_method', 'cash')
+        notes = (request.POST.get('notes') or '')[:255]
+
+        try:
+            with transaction.atomic():
+                profile = CustomerProfile.objects.select_for_update().get(user=customer)
+                if amount > profile.balance:
+                    amount = profile.balance
+                if amount <= 0:
+                    messages.info(request, "No outstanding balance to collect.")
+                    return redirect('customer_ledger_detail', user_id=user_id)
+
+                profile.balance = (profile.balance - amount).quantize(Decimal('0.01'))
+                profile.save(update_fields=['balance', 'updated_at'])
+
+                CustomerPayment.objects.create(
+                    customer=customer,
+                    amount=amount,
+                    payment_method=method if method in ('cash', 'card', 'other') else 'cash',
+                    received_by=request.user,
+                    notes=notes,
+                )
+            messages.success(
+                request,
+                f"Received {CURRENCY_SYMBOL}{amount}. New balance: {CURRENCY_SYMBOL}{profile.balance}."
+            )
+        except Exception:
+            messages.error(request, "Could not record payment. Please try again.")
+        return redirect('customer_ledger_detail', user_id=user_id)
+
+    return render(request, 'inventory/customer_ledger_detail.html', {
+        'customer': customer,
+        'profile': profile,
+        'sales': sales,
+        'payments': payments,
+        'currency': CURRENCY_SYMBOL,
+    })
+
+
+def custom_404(request, exception=None):
+    return render(request, 'inventory/404.html', status=404)
+
+
+def custom_500(request):
+    return render(request, 'inventory/500.html', status=500)
