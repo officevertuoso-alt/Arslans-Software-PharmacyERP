@@ -13,9 +13,21 @@ from django.core.files import File
 class Supplier(models.Model):
     name = models.CharField(max_length=100)
     contact_person = models.CharField(max_length=100)
-    email = models.EmailField()
-    phone_number = models.CharField(max_length=20)
-    address = models.TextField()
+    email = models.EmailField(blank=True)
+    phone_number = models.CharField(max_length=20, blank=True)
+    address = models.TextField(blank=True)
+    # Positive balance = we owe the supplier (accounts payable)
+    balance = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal('0.00'),
+        help_text='Outstanding payable to supplier (Rs.). Positive = we owe them.'
+    )
+    notes = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
 
     def __str__(self):
         return self.name
@@ -276,6 +288,100 @@ class CustomerPayment(models.Model):
 
     def __str__(self):
         return f"Payment Rs.{self.amount} from {self.customer.username} on {self.created_at.date()}"
+
+
+
+
+class SupplierPurchase(models.Model):
+    """
+    Supplier invoice / goods received note (GRN).
+    Increases stock via linked batches and increases supplier payable balance.
+    """
+    STATUS_DRAFT = 'draft'
+    STATUS_RECEIVED = 'received'
+    STATUS_CANCELLED = 'cancelled'
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, 'Draft'),
+        (STATUS_RECEIVED, 'Received'),
+        (STATUS_CANCELLED, 'Cancelled'),
+    ]
+
+    supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name='purchases')
+    invoice_number = models.CharField(max_length=64, help_text='Supplier invoice / bill number')
+    invoice_date = models.DateField(default=timezone.now)
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_RECEIVED)
+    subtotal = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
+    tax = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
+    total = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
+    amount_paid = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
+    notes = models.TextField(blank=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='supplier_purchases'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-invoice_date', '-id']
+        verbose_name = 'Supplier Purchase'
+        verbose_name_plural = 'Supplier Purchases'
+        unique_together = [('supplier', 'invoice_number')]
+
+    def __str__(self):
+        return f"{self.supplier.name} inv {self.invoice_number} — Rs.{self.total}"
+
+    @property
+    def amount_due(self):
+        return (self.total - self.amount_paid).quantize(Decimal('0.01'))
+
+
+class SupplierPurchaseLine(models.Model):
+    """Line item on a supplier purchase; creates/updates a ProductBatch on receive."""
+    purchase = models.ForeignKey(SupplierPurchase, on_delete=models.CASCADE, related_name='lines')
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name='supplier_lines')
+    batch_number = models.CharField(max_length=64)
+    quantity = models.PositiveIntegerField()
+    unit_cost = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    expiry_date = models.DateField()
+    line_total = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal('0.00'))
+    batch = models.ForeignKey(
+        'ProductBatch', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='purchase_lines'
+    )
+
+    def __str__(self):
+        return f"{self.product.name} x{self.quantity} @ {self.unit_cost}"
+
+    def save(self, *args, **kwargs):
+        self.line_total = (Decimal(self.quantity) * Decimal(self.unit_cost)).quantize(Decimal('0.01'))
+        super().save(*args, **kwargs)
+
+
+class SupplierPayment(models.Model):
+    """Payment made to a supplier against outstanding balance / invoices."""
+    supplier = models.ForeignKey(Supplier, on_delete=models.CASCADE, related_name='payments')
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    payment_method = models.CharField(
+        max_length=12,
+        choices=[('cash', 'Cash'), ('bank', 'Bank transfer'), ('cheque', 'Cheque'), ('other', 'Other')],
+        default='cash'
+    )
+    reference = models.CharField(max_length=64, blank=True, help_text='Cheque no / txn id')
+    purchase = models.ForeignKey(
+        SupplierPurchase, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='payments', help_text='Optional: allocate to a specific invoice'
+    )
+    paid_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='supplier_payments_made'
+    )
+    notes = models.CharField(max_length=255, blank=True)
+    paid_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-paid_at']
+
+    def __str__(self):
+        return f"Pay Rs.{self.amount} to {self.supplier.name} on {self.paid_at.date()}"
 
 
 class Return(models.Model):
