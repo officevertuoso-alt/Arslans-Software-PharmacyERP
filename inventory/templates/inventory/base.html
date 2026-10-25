@@ -35,6 +35,18 @@
                         <li class="nav-item"><a class="nav-link" href="{% url 'customer_ledger_list' %}">{% trans "Udhaar" %}</a></li>
                         <li class="nav-item"><a class="nav-link" href="{% url 'manage_returns' %}">{% trans "Returns" %}</a></li>
                         <li class="nav-item"><a class="nav-link" href="{% url 'reports_dashboard' %}">{% trans "Reports" %}</a></li>
+                        <li class="nav-item dropdown">
+                          <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">More</a>
+                          <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="{% url 'invoice_list' %}">Invoices / Void</a></li>
+                            <li><a class="dropdown-item" href="{% url 'customer_party_list' %}">Walk-in customers</a></li>
+                            <li><a class="dropdown-item" href="{% url 'supplier_return_list' %}">Supplier returns</a></li>
+                            <li><a class="dropdown-item" href="{% url 'auto_purchase_order' %}">Auto PO</a></li>
+                            <li><a class="dropdown-item" href="{% url 'controlled_register' %}">Controlled register</a></li>
+                            <li><a class="dropdown-item" href="{% url 'simple_pnl' %}">P&amp;L</a></li>
+                            <li><a class="dropdown-item" href="{% url 'audit_log_list' %}">Audit log</a></li>
+                          </ul>
+                        </li>
                         <li class="nav-item"><a class="nav-link" href="{% url 'notifications_list' %}">🔔 Alerts</a></li>
                         <li class="nav-item"><a class="nav-link" href="{% url 'cashbook_list' %}">Cashbook</a></li>
                         <li class="nav-item"><a class="nav-link" href="{% url 'charts_dashboard' %}">Charts</a></li>
