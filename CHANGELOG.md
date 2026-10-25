@@ -245,3 +245,19 @@ If you add more strings, run on a machine with gettext:
 
 ### Migration
 - `0015_generic_pack.py`
+
+
+## [Phase 11] — 2026-10-26 — Controlled drugs + Shift/Till
+
+### Controlled / Rx
+- Product: `is_controlled`, `requires_rx`
+- POS: if cart has such items → Rx number + doctor required
+- Saved on each sale line: `rx_number`, `rx_doctor`, `rx_patient`
+
+### Shift / Till
+- `/shift/open/` — opening float
+- POS blocked until shift open
+- `/shift/close/` — expected cash (float + cash sales + recoveries) vs counted, variance
+
+### Migration
+- `0016_controlled_shift.py`
