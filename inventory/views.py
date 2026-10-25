@@ -1,5 +1,5 @@
 from django.shortcuts import render, get_object_or_404, redirect
-from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation
+from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation, SupplierPurchase, SupplierPurchaseLine, SupplierPayment
 from datetime import timedelta
 from django.utils import timezone
 from django.contrib import messages
@@ -646,6 +646,244 @@ def receive_batch(request, product_id=None):
         'currency': CURRENCY_SYMBOL,
     })
 
+
+
+@admin_required
+def supplier_purchase_list(request):
+    purchases = (
+        SupplierPurchase.objects.select_related('supplier')
+        .order_by('-invoice_date', '-id')[:100]
+    )
+    return render(request, 'inventory/supplier_purchase_list.html', {
+        'purchases': purchases,
+        'currency': CURRENCY_SYMBOL,
+    })
+
+
+@admin_required
+def supplier_purchase_create(request):
+    """
+    Create a supplier invoice with one or more lines.
+    On save (status=received): create/update batches, increase supplier balance.
+    Form posts repeated line fields: product_id[], batch_number[], quantity[], unit_cost[], expiry_date[]
+    """
+    products = Product.objects.all().order_by('name')
+    suppliers = Supplier.objects.filter(is_active=True).order_by('name')
+
+    if request.method == 'POST':
+        try:
+            supplier_id = int(request.POST.get('supplier_id'))
+            invoice_number = (request.POST.get('invoice_number') or '').strip()
+            invoice_date = request.POST.get('invoice_date') or timezone.now().date().isoformat()
+            tax = Decimal(str(request.POST.get('tax') or '0')).quantize(Decimal('0.01'))
+            notes = (request.POST.get('notes') or '')[:2000]
+            amount_paid_now = Decimal(str(request.POST.get('amount_paid') or '0')).quantize(Decimal('0.01'))
+
+            product_ids = request.POST.getlist('product_id')
+            batch_numbers = request.POST.getlist('batch_number')
+            quantities = request.POST.getlist('quantity')
+            unit_costs = request.POST.getlist('unit_cost')
+            expiries = request.POST.getlist('expiry_date')
+
+            if not supplier_id or not invoice_number:
+                raise ValueError('Supplier and invoice number are required.')
+            if not product_ids:
+                raise ValueError('Add at least one line item.')
+
+            lines_data = []
+            subtotal = Decimal('0.00')
+            for i, pid in enumerate(product_ids):
+                if not pid:
+                    continue
+                qty = int(quantities[i])
+                cost = Decimal(str(unit_costs[i] or '0')).quantize(Decimal('0.01'))
+                bn = (batch_numbers[i] or '').strip()
+                exp = expiries[i]
+                if qty <= 0 or not bn or not exp:
+                    raise ValueError(f'Line {i+1}: batch number, quantity and expiry are required.')
+                line_total = (Decimal(qty) * cost).quantize(Decimal('0.01'))
+                subtotal += line_total
+                lines_data.append({
+                    'product_id': int(pid),
+                    'batch_number': bn,
+                    'quantity': qty,
+                    'unit_cost': cost,
+                    'expiry_date': exp,
+                    'line_total': line_total,
+                })
+
+            if not lines_data:
+                raise ValueError('Add at least one valid line item.')
+
+            total = (subtotal + tax).quantize(Decimal('0.01'))
+            if amount_paid_now < 0:
+                amount_paid_now = Decimal('0.00')
+            if amount_paid_now > total:
+                amount_paid_now = total
+
+            with transaction.atomic():
+                supplier = Supplier.objects.select_for_update().get(pk=supplier_id)
+                purchase = SupplierPurchase.objects.create(
+                    supplier=supplier,
+                    invoice_number=invoice_number,
+                    invoice_date=invoice_date,
+                    status=SupplierPurchase.STATUS_RECEIVED,
+                    subtotal=subtotal,
+                    tax=tax,
+                    total=total,
+                    amount_paid=amount_paid_now,
+                    notes=notes,
+                    created_by=request.user,
+                )
+
+                for ld in lines_data:
+                    product = Product.objects.select_for_update().get(pk=ld['product_id'])
+                    batch, created = ProductBatch.objects.select_for_update().get_or_create(
+                        product=product,
+                        batch_number=ld['batch_number'],
+                        defaults={
+                            'quantity': 0,
+                            'expiry_date': ld['expiry_date'],
+                            'purchase_cost': ld['unit_cost'],
+                            'supplier': supplier,
+                            'is_active': True,
+                        }
+                    )
+                    batch.quantity += ld['quantity']
+                    batch.expiry_date = ld['expiry_date']
+                    batch.purchase_cost = ld['unit_cost']
+                    batch.supplier = supplier
+                    batch.is_active = True
+                    batch.save()
+
+                    line = SupplierPurchaseLine.objects.create(
+                        purchase=purchase,
+                        product=product,
+                        batch_number=ld['batch_number'],
+                        quantity=ld['quantity'],
+                        unit_cost=ld['unit_cost'],
+                        expiry_date=ld['expiry_date'],
+                        line_total=ld['line_total'],
+                        batch=batch,
+                    )
+
+                    product.quantity = product.total_batch_quantity()
+                    nearest = (
+                        product.batches.filter(is_active=True, quantity__gt=0)
+                        .order_by('expiry_date').values_list('expiry_date', flat=True).first()
+                    )
+                    if nearest:
+                        product.expiry_date = nearest
+                    product.save(update_fields=['quantity', 'expiry_date'])
+
+                # Increase supplier payable by unpaid portion
+                payable = (total - amount_paid_now).quantize(Decimal('0.01'))
+                if payable > 0:
+                    supplier.balance = (supplier.balance + payable).quantize(Decimal('0.01'))
+                    supplier.save(update_fields=['balance', 'updated_at'])
+
+                if amount_paid_now > 0:
+                    SupplierPayment.objects.create(
+                        supplier=supplier,
+                        amount=amount_paid_now,
+                        payment_method='cash',
+                        purchase=purchase,
+                        paid_by=request.user,
+                        notes=f'Paid with invoice {invoice_number}',
+                    )
+
+            messages.success(
+                request,
+                f"Purchase {invoice_number} received. Total {CURRENCY_SYMBOL}{total}. "
+                f"Supplier balance now {CURRENCY_SYMBOL}{supplier.balance}."
+            )
+            return redirect('supplier_purchase_list')
+        except Exception as e:
+            messages.error(request, f"Could not save purchase: {e}")
+
+    return render(request, 'inventory/supplier_purchase_form.html', {
+        'products': products,
+        'suppliers': suppliers,
+        'currency': CURRENCY_SYMBOL,
+        'today': timezone.now().date().isoformat(),
+    })
+
+
+@admin_required
+def supplier_purchase_detail(request, pk):
+    purchase = get_object_or_404(
+        SupplierPurchase.objects.select_related('supplier').prefetch_related('lines__product'),
+        pk=pk
+    )
+    return render(request, 'inventory/supplier_purchase_detail.html', {
+        'purchase': purchase,
+        'currency': CURRENCY_SYMBOL,
+    })
+
+
+@admin_required
+def supplier_pay(request, supplier_id):
+    supplier = get_object_or_404(Supplier, pk=supplier_id)
+    if request.method == 'POST':
+        try:
+            amount = Decimal(str(request.POST.get('amount', '0'))).quantize(Decimal('0.01'))
+            method = request.POST.get('payment_method', 'cash')
+            reference = (request.POST.get('reference') or '')[:64]
+            notes = (request.POST.get('notes') or '')[:255]
+            purchase_id = request.POST.get('purchase_id') or None
+
+            if amount <= 0:
+                raise ValueError('Amount must be greater than zero.')
+
+            with transaction.atomic():
+                supplier = Supplier.objects.select_for_update().get(pk=supplier_id)
+                if amount > supplier.balance:
+                    amount = supplier.balance
+                if amount <= 0:
+                    messages.info(request, 'No outstanding balance.')
+                    return redirect('supplier_list')
+
+                purchase = None
+                if purchase_id:
+                    purchase = SupplierPurchase.objects.select_for_update().filter(
+                        pk=purchase_id, supplier=supplier
+                    ).first()
+                    if purchase:
+                        apply = min(amount, purchase.amount_due)
+                        purchase.amount_paid = (purchase.amount_paid + apply).quantize(Decimal('0.01'))
+                        purchase.save(update_fields=['amount_paid', 'updated_at'])
+
+                supplier.balance = (supplier.balance - amount).quantize(Decimal('0.01'))
+                supplier.save(update_fields=['balance', 'updated_at'])
+
+                SupplierPayment.objects.create(
+                    supplier=supplier,
+                    amount=amount,
+                    payment_method=method if method in ('cash', 'bank', 'cheque', 'other') else 'cash',
+                    reference=reference,
+                    purchase=purchase,
+                    paid_by=request.user,
+                    notes=notes,
+                )
+            messages.success(
+                request,
+                f"Paid {CURRENCY_SYMBOL}{amount} to {supplier.name}. "
+                f"Balance now {CURRENCY_SYMBOL}{supplier.balance}."
+            )
+            return redirect('supplier_list')
+        except Exception as e:
+            messages.error(request, f"Payment failed: {e}")
+
+    open_purchases = SupplierPurchase.objects.filter(
+        supplier=supplier, status=SupplierPurchase.STATUS_RECEIVED
+    ).order_by('-invoice_date')
+    payments = SupplierPayment.objects.filter(supplier=supplier)[:30]
+    return render(request, 'inventory/supplier_pay.html', {
+        'supplier': supplier,
+        'open_purchases': open_purchases,
+        'payments': payments,
+        'currency': CURRENCY_SYMBOL,
+    })
 
 def custom_404(request, exception=None):
     return render(request, 'inventory/404.html', status=404)
