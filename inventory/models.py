@@ -43,6 +43,18 @@ class Product(models.Model):
     supplier = models.ForeignKey(Supplier, on_delete=models.SET_NULL, null=True, blank=True)
     image = models.ImageField(upload_to='products/', blank=True, null=True)
     barcode = models.ImageField(upload_to='barcodes/', blank=True)
+    barcode_number = models.CharField(
+        max_length=64, blank=True, db_index=True,
+        help_text='Scannable barcode / EAN / internal code'
+    )
+    units_per_pack = models.PositiveIntegerField(
+        default=1,
+        help_text='Tablets/units in one pack (for loose sale). 1 = sold only as whole pack.'
+    )
+    allow_loose = models.BooleanField(
+        default=True,
+        help_text='Allow selling individual units from pack'
+    )
 
     def is_expired(self):
         return timezone.now().date() > self.expiry_date
@@ -250,6 +262,10 @@ class Purchase(models.Model):
     )
     purchase_date = models.DateTimeField(auto_now_add=True)
     notes = models.CharField(max_length=255, blank=True)
+    walk_in_name = models.CharField(max_length=120, blank=True)
+    walk_in_phone = models.CharField(max_length=20, blank=True)
+    discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    bill_number = models.CharField(max_length=32, blank=True, db_index=True)
 
     class Meta:
         ordering = ['-purchase_date']
@@ -606,3 +622,37 @@ class CreditDue(models.Model):
 
     def __str__(self):
         return f"{self.customer.username} due {self.amount} on {self.due_date}"
+
+
+
+class StockAdjustment(models.Model):
+    """Physical count / damage / expiry write-off."""
+    REASON_COUNT = 'count'
+    REASON_DAMAGE = 'damage'
+    REASON_EXPIRY = 'expiry'
+    REASON_OTHER = 'other'
+    REASON_CHOICES = [
+        (REASON_COUNT, 'Stock count difference'),
+        (REASON_DAMAGE, 'Damage / breakage'),
+        (REASON_EXPIRY, 'Expiry write-off'),
+        (REASON_OTHER, 'Other'),
+    ]
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='adjustments')
+    batch = models.ForeignKey(
+        'ProductBatch', on_delete=models.SET_NULL, null=True, blank=True, related_name='adjustments'
+    )
+    quantity_before = models.IntegerField()
+    quantity_after = models.IntegerField()
+    quantity_delta = models.IntegerField(help_text='after - before (negative = stock out)')
+    reason = models.CharField(max_length=12, choices=REASON_CHOICES, default=REASON_COUNT)
+    notes = models.CharField(max_length=255, blank=True)
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='stock_adjustments'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'Adj {self.product_id} {self.quantity_delta} ({self.reason})'
