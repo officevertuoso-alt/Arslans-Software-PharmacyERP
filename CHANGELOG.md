@@ -93,3 +93,24 @@
 
 ### Migration
 - `0011_supplier_purchases.py`
+
+
+## [Phase 5] — 2026-10-26 — Returns Accounting
+
+### Return model
+- Link to original `sale` (Purchase)
+- `refund_method`: cash / credit to udhaar / none
+- `refund_amount`, `restock`, `processed_at`, `processed_by`
+
+### Approval workflow
+- Suggested refund from original sale unit price (or product price)
+- Restock into existing non-expired batch or create `RET-...` batch
+- Credit refund reduces customer outstanding balance
+- Cash refund recorded on the return (drawer handled operationally)
+- Full atomic transaction
+
+### UI
+- Manage returns: approve form with amount, method, restock checkbox
+
+### Migration
+- `0012_return_accounting.py`
