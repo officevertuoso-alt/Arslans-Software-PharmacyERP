@@ -28,3 +28,6 @@ barcodes/
 
 # Static files (collected)
 staticfiles/
+
+backups/
+*.sqlite3.backup
