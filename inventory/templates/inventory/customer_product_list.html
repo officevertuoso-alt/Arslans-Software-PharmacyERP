@@ -71,7 +71,8 @@
                                     <label for="quantity-{{ product.pk }}">Quantity:</label>
                                     <input type="number" id="quantity-{{ product.pk }}" name="quantity" value="1" min="1" max="{{ product.quantity }}" class="quantity-input" style="width: 70px; font-size: 1.2rem; padding: 5px;">
                                     <button type="submit" class="btn btn-success">Buy</button>
-                                </form>
+                                <div class="form-check mb-2"><input class="form-check-input" type="checkbox" name="is_loose" value="1" id="loose"><label class="form-check-label" for="loose">Loose / unit sale</label></div>
+</form>
                             {% else %}
                                 <a href="{% url 'login' %}?next={% url 'customer_product_list' %}" class="nav-btn">Buy</a>
                             {% endif %}
