@@ -385,16 +385,61 @@ class SupplierPayment(models.Model):
 
 
 class Return(models.Model):
-    product = models.ForeignKey(Product, on_delete=models.CASCADE)
-    customer = models.ForeignKey(User, on_delete=models.CASCADE)
+    """
+    Customer return against a sale.
+    On approval: restock (batch), reverse revenue via cash refund or credit to customer balance.
+    """
+    STATUS_PENDING = "Pending"
+    STATUS_APPROVED = "Approved"
+    STATUS_REJECTED = "Rejected"
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+    ]
+
+    REFUND_CASH = "cash"
+    REFUND_CREDIT = "credit"
+    REFUND_NONE = "none"
+    REFUND_CHOICES = [
+        (REFUND_CASH, "Cash refund"),
+        (REFUND_CREDIT, "Credit to udhaar balance"),
+        (REFUND_NONE, "No monetary refund"),
+    ]
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name="returns")
+    customer = models.ForeignKey(User, on_delete=models.CASCADE, related_name="returns")
+    sale = models.ForeignKey(
+        "Purchase", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="returns", help_text="Original sale this return refers to"
+    )
     quantity = models.PositiveIntegerField()
     reason = models.TextField()
-    status = models.CharField(
-        max_length=10,
-        choices=[("Pending", "Pending"), ("Approved", "Approved"), ("Rejected", "Rejected")],
-        default="Pending"
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    refund_method = models.CharField(max_length=10, choices=REFUND_CHOICES, default=REFUND_CASH)
+    refund_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("0.00"),
+        help_text="Monetary value refunded (Rs.)"
     )
+    restock = models.BooleanField(default=True, help_text="Return units to inventory")
     date_requested = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+    processed_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="processed_returns"
+    )
+    notes = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ["-date_requested"]
 
     def __str__(self):
-        return f"Return of {self.quantity} x {self.product.name} by {self.customer.username}"
+        return f"Return of {self.quantity} x {self.product.name} by {self.customer.username} [{self.status}]"
+
+    def suggested_refund(self):
+        """Unit price from linked sale or current product price."""
+        if self.sale_id and self.sale.quantity:
+            unit = (self.sale.total_price / Decimal(self.sale.quantity)).quantize(Decimal("0.01"))
+        else:
+            unit = Decimal(self.product.price)
+        return (unit * Decimal(self.quantity)).quantize(Decimal("0.01"))
