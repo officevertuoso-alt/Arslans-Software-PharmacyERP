@@ -443,3 +443,166 @@ class Return(models.Model):
         else:
             unit = Decimal(self.product.price)
         return (unit * Decimal(self.quantity)).quantize(Decimal("0.01"))
+
+
+
+class CashbookEntry(models.Model):
+    """
+    Real-time cash / bank book for every money movement.
+    Positive amount = money in; negative = money out (stored as signed amount).
+    """
+    TYPE_SALE = 'sale'
+    TYPE_SALE_RETURN = 'sale_return'
+    TYPE_PURCHASE = 'purchase'
+    TYPE_PURCHASE_RETURN = 'purchase_return'
+    TYPE_CREDIT_GIVEN = 'credit_given'      # customer took udhaar (no cash in)
+    TYPE_CREDIT_RECOVERY = 'credit_recovery'  # customer paid udhaar
+    TYPE_SUPPLIER_PAYMENT = 'supplier_payment'
+    TYPE_EXPENSE = 'expense'
+    TYPE_INCOME_OTHER = 'income_other'
+    TYPE_ADJUSTMENT = 'adjustment'
+    TYPE_CHOICES = [
+        (TYPE_SALE, 'Sale (cash/online in)'),
+        (TYPE_SALE_RETURN, 'Sale return (cash out)'),
+        (TYPE_PURCHASE, 'Supplier purchase (cash out)'),
+        (TYPE_PURCHASE_RETURN, 'Purchase return (cash in)'),
+        (TYPE_CREDIT_GIVEN, 'Credit given (udhaar)'),
+        (TYPE_CREDIT_RECOVERY, 'Credit recovery'),
+        (TYPE_SUPPLIER_PAYMENT, 'Supplier payment'),
+        (TYPE_EXPENSE, 'Expense'),
+        (TYPE_INCOME_OTHER, 'Other income'),
+        (TYPE_ADJUSTMENT, 'Adjustment'),
+    ]
+
+    EXPENSE_SALARY = 'salary'
+    EXPENSE_UTILITY = 'utility'
+    EXPENSE_TRAVEL = 'travel'
+    EXPENSE_MAINTENANCE = 'maintenance'
+    EXPENSE_RENT = 'rent'
+    EXPENSE_MISC = 'misc'
+    EXPENSE_CHOICES = [
+        (EXPENSE_SALARY, 'Salary'),
+        (EXPENSE_UTILITY, 'Utility bills'),
+        (EXPENSE_TRAVEL, 'Traveling'),
+        (EXPENSE_MAINTENANCE, 'Maintenance'),
+        (EXPENSE_RENT, 'Rent'),
+        (EXPENSE_MISC, 'Miscellaneous'),
+    ]
+
+    entry_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    expense_category = models.CharField(
+        max_length=20, choices=EXPENSE_CHOICES, blank=True, null=True
+    )
+    amount = models.DecimalField(
+        max_digits=14, decimal_places=2,
+        help_text='Signed: positive = cash in, negative = cash out'
+    )
+    payment_channel = models.CharField(
+        max_length=12,
+        choices=[('cash', 'Cash'), ('online', 'Online'), ('bank', 'Bank'), ('other', 'Other')],
+        default='cash'
+    )
+    description = models.CharField(max_length=255, blank=True)
+    reference = models.CharField(max_length=64, blank=True, help_text='Invoice / sale id')
+    customer = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='cashbook_entries'
+    )
+    supplier = models.ForeignKey(
+        Supplier, on_delete=models.SET_NULL, null=True, blank=True, related_name='cashbook_entries'
+    )
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='cashbook_created'
+    )
+    entry_date = models.DateField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-entry_date', '-id']
+        verbose_name = 'Cashbook Entry'
+        verbose_name_plural = 'Cashbook Entries'
+
+    def __str__(self):
+        return f"{self.entry_type} {self.amount} on {self.entry_date}"
+
+    @property
+    def is_inflow(self):
+        return self.amount >= 0
+
+
+class MedicineMaster(models.Model):
+    """
+    National catalog for purchase autocomplete — NOT live stock.
+    Stock is only created when goods are purchased into Product/ProductBatch.
+    """
+    product_name = models.CharField(max_length=255, db_index=True)
+    brand_name = models.CharField(max_length=120, blank=True, db_index=True)
+    ingredients = models.CharField(max_length=500, blank=True)
+    company = models.CharField(max_length=200, blank=True)
+    strength = models.CharField(max_length=120, blank=True)
+    dosage_form = models.CharField(max_length=80, blank=True)
+    pack_size = models.CharField(max_length=80, blank=True)
+    therapeutic_group = models.CharField(max_length=120, blank=True)
+    legacy_retail_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    legacy_trade_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    current_mrp = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['product_name']
+        indexes = [
+            models.Index(fields=['brand_name', 'product_name']),
+        ]
+
+    def __str__(self):
+        return self.product_name
+
+
+class AppNotification(models.Model):
+    """In-app notification feed (expiry, credit due, sales summary)."""
+    KIND_EXPIRY = 'expiry'
+    KIND_CREDIT_DUE = 'credit_due'
+    KIND_SALES = 'sales'
+    KIND_STOCK = 'stock'
+    KIND_SYSTEM = 'system'
+    KIND_CHOICES = [
+        (KIND_EXPIRY, 'Near / expired stock'),
+        (KIND_CREDIT_DUE, 'Credit due'),
+        (KIND_SALES, 'Sales summary'),
+        (KIND_STOCK, 'Stock alert'),
+        (KIND_SYSTEM, 'System'),
+    ]
+
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES)
+    title = models.CharField(max_length=200)
+    message = models.TextField()
+    link = models.CharField(max_length=255, blank=True)
+    is_read = models.BooleanField(default=False)
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, null=True, blank=True,
+        related_name='app_notifications', help_text='Null = all staff'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"[{self.kind}] {self.title}"
+
+
+class CreditDue(models.Model):
+    """Tracks partial-payment / credit sale due dates for notifications."""
+    customer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='credit_dues')
+    sale = models.ForeignKey('Purchase', on_delete=models.SET_NULL, null=True, blank=True, related_name='dues')
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    due_date = models.DateField()
+    phone = models.CharField(max_length=20, blank=True)
+    notes = models.CharField(max_length=255, blank=True)
+    is_settled = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['due_date']
+
+    def __str__(self):
+        return f"{self.customer.username} due {self.amount} on {self.due_date}"
