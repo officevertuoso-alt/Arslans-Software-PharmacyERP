@@ -35,6 +35,10 @@ class Supplier(models.Model):
 
 class Product(models.Model):
     name = models.CharField(max_length=100)
+    generic_name = models.CharField(
+        max_length=200, blank=True, db_index=True,
+        help_text='Salt / generic (e.g. Paracetamol) for alternate search'
+    )
     category = models.CharField(max_length=50)
     quantity = models.PositiveIntegerField()
     expiry_date = models.DateField()
@@ -89,6 +93,32 @@ class Product(models.Model):
             ean.write(buffer)
             self.barcode.save(f'{self.id}.png', File(buffer), save=False)
         super().save(*args, **kwargs)
+
+    
+    def units_in_stock(self):
+        """Stock always stored as base units (tablets/ml pieces)."""
+        return int(self.quantity or 0)
+
+    def packs_in_stock(self):
+        upp = max(1, int(self.units_per_pack or 1))
+        return self.units_in_stock() // upp
+
+    def loose_remainder(self):
+        upp = max(1, int(self.units_per_pack or 1))
+        return self.units_in_stock() % upp
+
+    def to_base_units(self, packs=0, loose_units=0):
+        upp = max(1, int(self.units_per_pack or 1))
+        return int(packs) * upp + int(loose_units)
+
+    def display_stock(self):
+        upp = max(1, int(self.units_per_pack or 1))
+        if upp <= 1:
+            return f"{self.quantity} units"
+        p, r = divmod(int(self.quantity or 0), upp)
+        if r:
+            return f"{p} pack + {r} loose"
+        return f"{p} pack"
 
     def total_batch_quantity(self):
         """Sum of non-expired active batch quantities."""
