@@ -37,4 +37,9 @@ urlpatterns = [
     path('shop/', views.customer_product_list, name='customer_product_list'),
     path('buy/<int:pk>/', views.purchase_product, name='purchase_product'),
     path('checkout/', views.checkout, name='checkout'),
+
+    # Customer credit / udhaar
+    path('my-ledger/', views.my_ledger, name='my_ledger'),
+    path('customers/ledger/', views.customer_ledger_list, name='customer_ledger_list'),
+    path('customers/ledger/<int:user_id>/', views.customer_ledger_detail, name='customer_ledger_detail'),
 ]
