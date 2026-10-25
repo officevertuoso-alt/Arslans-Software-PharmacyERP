@@ -197,3 +197,14 @@ If you add more strings, run on a machine with gettext:
 
 ### Purchase
 - Tip link to Medicine Master for catalog-driven SKU setup
+
+
+## [Phase 8C] — 2026-10-26 — Fast POS (Candela-style)
+
+### Screen `/pos/`
+- Always-focused barcode / name search
+- Multi-item cart in session
+- Scanner: code + Enter adds line (qty merges)
+- Keyboard: F2 search, Enter add, ↑↓ cart, +/- qty, Del remove, F12 pay
+- Payment: Cash / Online / Credit / Partial + due phone fields
+- Atomic multi-line FEFO sale + cashbook + CreditDue
