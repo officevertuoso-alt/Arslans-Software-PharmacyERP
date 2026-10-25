@@ -42,4 +42,10 @@ urlpatterns = [
     path('my-ledger/', views.my_ledger, name='my_ledger'),
     path('customers/ledger/', views.customer_ledger_list, name='customer_ledger_list'),
     path('customers/ledger/<int:user_id>/', views.customer_ledger_detail, name='customer_ledger_detail'),
+
+    # Batches / FEFO
+    path('batches/', views.batch_list, name='batch_list'),
+    path('batches/product/<int:product_id>/', views.batch_list, name='batch_list_product'),
+    path('batches/receive/', views.receive_batch, name='receive_batch'),
+    path('batches/receive/<int:product_id>/', views.receive_batch, name='receive_batch'),
 ]
