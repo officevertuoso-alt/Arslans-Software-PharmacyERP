@@ -1,3 +1,4 @@
+{% load i18n %}
 {% extends 'inventory/base.html' %}
 
 {% block title %}Checkout - PharmaStock{% endblock %}
@@ -17,7 +18,7 @@
 
         <div class="card shadow-sm">
             <div class="card-body">
-                <h2 class="card-title text-center">Checkout</h2>
+                <h2 class="card-title text-center">{% trans "Checkout" %}</h2>
                 <p class="text-center text-muted">Review your order and complete your payment</p>
 
                 <div class="mb-3">
@@ -36,14 +37,14 @@
                 <form method="post">
                     {% csrf_token %}
                     <div class="mb-3">
-                        <label for="payment_amount" class="form-label">Payment Amount</label>
+                        <label for="payment_amount" class="form-label">{% trans "Payment Amount" %}</label>
                         <input type="number" id="payment_amount" name="payment_amount" 
                                class="form-control" step="0.01" 
                                min="{{ total_cost|floatformat:2 }}" required>
                     </div>
                     <div class="d-grid gap-2">
-                        <button type="submit" class="btn btn-primary">Pay</button>
-                        <a href="{% url 'customer_product_list' %}" class="btn btn-secondary">Back to Shop</a>
+                        <button type="submit" class="btn btn-primary">{% trans "Pay" %}</button>
+                        <a href="{% url 'customer_product_list' %}" class="btn btn-secondary">{% trans "Back to Shop" %}</a>
                     </div>
                 </form>
 
