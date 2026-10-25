@@ -147,3 +147,22 @@ def quantize_money(value):
 # Custom error handlers (views must define these)
 HANDLER404 = 'inventory.views.custom_404'
 HANDLER500 = 'inventory.views.custom_500'
+
+
+# --- SMS / WhatsApp gateway (configure via environment) ---
+# SMS_PROVIDER: console | http | twilio
+SMS_PROVIDER = os.environ.get('SMS_PROVIDER', 'console')
+SMS_API_URL = os.environ.get('SMS_API_URL', '')  # generic HTTP POST endpoint
+SMS_API_KEY = os.environ.get('SMS_API_KEY', '')
+SMS_SENDER_ID = os.environ.get('SMS_SENDER_ID', 'ARSALAN')
+# WhatsApp: console | http | twilio
+WHATSAPP_PROVIDER = os.environ.get('WHATSAPP_PROVIDER', 'console')
+WHATSAPP_API_URL = os.environ.get('WHATSAPP_API_URL', '')
+WHATSAPP_API_KEY = os.environ.get('WHATSAPP_API_KEY', '')
+WHATSAPP_FROM = os.environ.get('WHATSAPP_FROM', '')  # e.g. whatsapp:+92...
+# Twilio (optional)
+TWILIO_ACCOUNT_SID = os.environ.get('TWILIO_ACCOUNT_SID', '')
+TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
+TWILIO_SMS_FROM = os.environ.get('TWILIO_SMS_FROM', '')
+TWILIO_WHATSAPP_FROM = os.environ.get('TWILIO_WHATSAPP_FROM', '')
+MESSAGING_ENABLED = os.environ.get('MESSAGING_ENABLED', '0') == '1'
