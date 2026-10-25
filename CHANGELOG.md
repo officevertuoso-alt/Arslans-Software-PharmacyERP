@@ -1,0 +1,34 @@
+# Changelog — Arslan's Software Pharmacy ERP
+
+## [Phase 1] — 2026-10-26 — Commercial Foundation
+
+### Security & Configuration
+- `SECRET_KEY` and `DEBUG` now read from environment variables (`.env` supported via python-dotenv).
+- `ALLOWED_HOSTS` configurable via env.
+- Added `LocaleMiddleware` and bilingual language list (English + اردو) ready for Phase 7.
+
+### Pakistan localization
+- `TIME_ZONE` changed from `Asia/Manila` to **`Asia/Karachi`**.
+- Currency symbol standardized to **`Rs.`** (PKR).
+- Checkout and success messages no longer show ₱.
+
+### Money safety (critical)
+- Checkout and payment handling now use **`Decimal`** with 2-decimal quantize instead of `float`.
+- Income report totals also use Decimal.
+
+### Transaction safety (critical)
+- Sale (checkout) now runs inside **`transaction.atomic()`** + `select_for_update()` to prevent overselling under concurrent use.
+- Return approval also uses atomic + row lock; already-processed returns are rejected.
+
+### Other
+- Added `requirements.txt`.
+- Added `custom_404` / `custom_500` handlers so settings no longer point to missing views.
+- Expired products blocked at purchase time.
+
+### Still pending (next phases)
+- Batch / lot / FEFO stock model
+- Proper supplier purchase / goods-receipt ledger
+- Customer credit (udhaar) & partial payments
+- Full bilingual UI + reports
+- Backup / restore module
+- Automated tests & Windows installer
