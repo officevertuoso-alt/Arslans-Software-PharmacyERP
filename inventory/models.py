@@ -59,6 +59,14 @@ class Product(models.Model):
         default=True,
         help_text='Allow selling individual units from pack'
     )
+    is_controlled = models.BooleanField(
+        default=False,
+        help_text='Controlled / narcotic — requires Rx on sale'
+    )
+    requires_rx = models.BooleanField(
+        default=False,
+        help_text='Prescription required at POS'
+    )
 
     def is_expired(self):
         return timezone.now().date() > self.expiry_date
@@ -296,6 +304,9 @@ class Purchase(models.Model):
     walk_in_phone = models.CharField(max_length=20, blank=True)
     discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
     bill_number = models.CharField(max_length=32, blank=True, db_index=True)
+    rx_number = models.CharField(max_length=64, blank=True)
+    rx_doctor = models.CharField(max_length=120, blank=True)
+    rx_patient = models.CharField(max_length=120, blank=True)
 
     class Meta:
         ordering = ['-purchase_date']
@@ -686,3 +697,27 @@ class StockAdjustment(models.Model):
 
     def __str__(self):
         return f'Adj {self.product_id} {self.quantity_delta} ({self.reason})'
+
+
+
+class PosShift(models.Model):
+    """Till / shift open-close for cash discipline."""
+    STATUS_OPEN = 'open'
+    STATUS_CLOSED = 'closed'
+    STATUS_CHOICES = [(STATUS_OPEN, 'Open'), (STATUS_CLOSED, 'Closed')]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='pos_shifts')
+    opened_at = models.DateTimeField(auto_now_add=True)
+    closed_at = models.DateTimeField(null=True, blank=True)
+    opening_float = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    closing_declared = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    expected_cash = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    variance = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_OPEN)
+    notes = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ['-opened_at']
+
+    def __str__(self):
+        return f'Shift {self.id} {self.user.username} ({self.status})'
