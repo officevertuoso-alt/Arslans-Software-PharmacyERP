@@ -1,0 +1,12 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Supplier returns{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <div class="d-flex justify-content-between"><h2>Supplier returns</h2>
+  <a class="btn btn-primary" href="{% url 'supplier_return_create' %}">New</a></div>
+  <table class="table table-sm"><thead><tr><th>When</th><th>Supplier</th><th>Product</th><th>Qty</th><th>Amount</th></tr></thead>
+  <tbody>{% for r in rows %}
+    <tr><td>{{ r.created_at|date:"Y-m-d" }}</td><td>{{ r.supplier.name }}</td><td>{{ r.product.name }}</td><td>{{ r.quantity }}</td><td>{{ currency }}{{ r.total_amount }}</td></tr>
+  {% empty %}<tr><td colspan="5">None</td></tr>{% endfor %}</tbody></table>
+</div>
+{% endblock %}
