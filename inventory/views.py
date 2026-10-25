@@ -2381,6 +2381,146 @@ def shift_close(request):
         'currency': CURRENCY_SYMBOL,
     })
 
+
+@login_required
+def pos_product_help(request):
+    """
+    Candela-style F1 product help: search live Products + MedicineMaster catalog.
+    """
+    from django.http import JsonResponse
+    from django.db import models as djmodels
+    q = (request.GET.get('q') or '').strip()
+    source = request.GET.get('source') or 'all'  # all | stock | master
+    limit = min(int(request.GET.get('limit') or 40), 80)
+    results = []
+
+    if source in ('all', 'stock') and q:
+        pqs = Product.objects.filter(
+            djmodels.Q(name__icontains=q) |
+            djmodels.Q(generic_name__icontains=q) |
+            djmodels.Q(barcode_number__icontains=q)
+        ).order_by('name')[:limit]
+        for p in pqs:
+            results.append({
+                'kind': 'stock',
+                'id': p.id,
+                'name': p.name,
+                'generic': p.generic_name or '',
+                'price': str(p.price),
+                'stock_display': p.display_stock(),
+                'stock': p.quantity,
+                'barcode': p.barcode_number or '',
+                'units_per_pack': p.units_per_pack or 1,
+            })
+
+    if source in ('all', 'master') and q and len(results) < limit:
+        need = limit - len(results)
+        mqs = MedicineMaster.objects.filter(
+            djmodels.Q(product_name__icontains=q) |
+            djmodels.Q(brand_name__icontains=q) |
+            djmodels.Q(ingredients__icontains=q) |
+            djmodels.Q(company__icontains=q),
+            is_active=True,
+        ).order_by('product_name')[:need]
+        for m in mqs:
+            price = m.current_mrp or m.legacy_retail_price or 0
+            results.append({
+                'kind': 'master',
+                'id': m.id,
+                'name': m.product_name,
+                'generic': m.ingredients or '',
+                'brand': m.brand_name or '',
+                'company': m.company or '',
+                'pack': m.pack_size or '',
+                'price': str(price),
+                'stock_display': 'Catalog (not in stock)',
+                'stock': 0,
+            })
+
+    if not q and source in ('all', 'stock'):
+        # top stocked products when empty query
+        for p in Product.objects.filter(quantity__gt=0).order_by('name')[:limit]:
+            results.append({
+                'kind': 'stock',
+                'id': p.id,
+                'name': p.name,
+                'generic': p.generic_name or '',
+                'price': str(p.price),
+                'stock_display': p.display_stock(),
+                'stock': p.quantity,
+                'barcode': p.barcode_number or '',
+                'units_per_pack': p.units_per_pack or 1,
+            })
+
+    return JsonResponse({'results': results, 'q': q})
+
+
+@admin_required
+def master_to_product(request):
+    """Create a live Product SKU from MedicineMaster (qty=0) for stocking later."""
+    from django.http import JsonResponse
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST only'}, status=405)
+    try:
+        mid = int(request.POST.get('master_id'))
+    except (TypeError, ValueError):
+        return JsonResponse({'error': 'Invalid id'})
+    master = get_object_or_404(MedicineMaster, pk=mid)
+    price = master.current_mrp or master.legacy_retail_price or Decimal('0.00')
+    # Avoid duplicate by name
+    existing = Product.objects.filter(name=master.product_name[:100]).first()
+    if existing:
+        return JsonResponse({
+            'ok': True, 'product_id': existing.id, 'name': existing.name,
+            'message': 'Already exists as stock product',
+        })
+    # minimal required fields - check Product model for required
+    from datetime import date as date_cls
+    # Placeholder expiry until real stock received via batch/purchase
+    product = Product(
+        name=master.product_name[:100],
+        category=(master.therapeutic_group or 'General')[:50],
+        price=price if price else Decimal('0.00'),
+        quantity=0,
+        expiry_date=date_cls(2099, 12, 31),
+        generic_name=(master.ingredients or '')[:200],
+    )
+    if hasattr(Product, 'barcode_number'):
+        product.barcode_number = ''
+    product.save()
+    return JsonResponse({
+        'ok': True, 'product_id': product.id, 'name': product.name,
+        'message': 'SKU created with qty 0 — receive stock via purchase/batch',
+    })
+
+
+@admin_required
+def preload_medicines_ui(request):
+    """Trigger catalog preload from default Excel path (or upload)."""
+    from django.core.management import call_command
+    from io import StringIO
+    if request.method == 'POST':
+        path = '/home/workdir/attachments/Pakistan_Medicine_Master_List_LEGACY_prices.xlsx'
+        if request.FILES.get('file'):
+            import tempfile, os
+            f = request.FILES['file']
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+            for chunk in f.chunks():
+                tmp.write(chunk)
+            tmp.close()
+            path = tmp.name
+        out = StringIO()
+        try:
+            limit = int(request.POST.get('limit') or 0)
+            clear = request.POST.get('clear') == '1'
+            call_command('preload_medicines', path, limit=limit, clear=clear, stdout=out)
+            messages.success(request, out.getvalue() or 'Import finished.')
+        except Exception as e:
+            messages.error(request, str(e))
+        return redirect('medicine_master_list')
+    return render(request, 'inventory/preload_medicines.html', {
+        'total_catalog': MedicineMaster.objects.count(),
+    })
 def custom_404(request, exception=None):
     return render(request, 'inventory/404.html', status=404)
 
