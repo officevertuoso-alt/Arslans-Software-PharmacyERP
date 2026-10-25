@@ -150,3 +150,30 @@ No new DB migration required for Phase 6.
 ### Note
 If you add more strings, run on a machine with gettext:
 `django-admin makemessages -l ur` then `django-admin compilemessages`
+
+
+## [Phase 8] — 2026-10-26 — Cashbook, Charts, Master catalog, Notifications
+
+### Cashbook (`/cashbook/`)
+- Real-time ledger: sale, purchase, credit, returns, **expenses** (salary, utility, travel, maintenance, rent, misc)
+- Tabs: All / Cash In / Cash Out / Expenses
+- Manual expense entry form
+
+### Charts (`/charts/`) — LalanaChami-style
+- Sales per Month (bar)
+- Sales per Drug top 10 (horizontal bar)
+- Cashbook net 14-day line
+- Chart.js (no Mongo embed dependency)
+
+### Medicine master
+- Catalog only (not stock)
+- Bulk import CSV/XLSX, export CSV
+- Autocomplete API `/medicine-master/suggest/`
+
+### Notifications
+- In-app feed + browser desktop Notification API
+- Near expiry, expired stock, credit due, daily sales summary
+- `/notifications/refresh/` to regenerate alerts
+
+### Migration
+- `0013_cashbook_master_notifications.py`
