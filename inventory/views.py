@@ -1,5 +1,5 @@
 from django.shortcuts import render, get_object_or_404, redirect
-from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation, SupplierPurchase, SupplierPurchaseLine, SupplierPayment, CashbookEntry, MedicineMaster, AppNotification, CreditDue, StockAdjustment, PosShift, CustomerParty, SaleInvoice, AuditLog, SupplierReturn, PurchaseOrder, PurchaseOrderLine
+from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation, SupplierPurchase, SupplierPurchaseLine, SupplierPayment, CashbookEntry, MedicineMaster, AppNotification, CreditDue, StockAdjustment, PosShift, CustomerParty, SaleInvoice, AuditLog, SupplierReturn, PurchaseOrder, PurchaseOrderLine, MessageLog
 from datetime import timedelta
 from django.utils import timezone
 from django.contrib import messages
@@ -2745,6 +2745,72 @@ def simple_pnl(request):
 def audit_log_list(request):
     logs = AuditLog.objects.select_related('user')[:200]
     return render(request, 'inventory/audit_log.html', {'logs': logs})
+
+
+@admin_required
+def messaging_center(request):
+    """Configure test + send due reminders; view message log."""
+    from django.conf import settings as djsettings
+    from inventory.messaging import dispatch, normalize_pk_phone
+
+    if request.method == 'POST':
+        action = request.POST.get('action')
+        if action == 'test':
+            phone = request.POST.get('phone', '')
+            channel = request.POST.get('channel', 'sms')
+            body = request.POST.get('body') or 'Test message from Arslan Software Pharmacy.'
+            log = dispatch(channel, phone, body, user=request.user, purpose='test')
+            messages.info(request, f'Test {log.channel}: {log.status} ({log.provider})')
+            return redirect('messaging_center')
+        if action == 'due_reminders':
+            channel = request.POST.get('channel', 'sms')
+            today = timezone.now().date()
+            dues = CreditDue.objects.filter(is_settled=False, due_date__lte=today).select_related('customer')
+            sent = 0
+            for d in dues:
+                phone = d.phone or ''
+                if not phone:
+                    try:
+                        phone = d.customer.customer_profile.phone
+                    except Exception:
+                        phone = ''
+                if not phone:
+                    continue
+                body = (
+                    f'Arslan Pharmacy: Credit due Rs.{d.amount} was due on {d.due_date}. '
+                    f'Please pay at your earliest. Thank you.'
+                )
+                dispatch(channel, phone, body, user=request.user, purpose='due_reminder')
+                sent += 1
+            messages.success(request, f'Due reminders queued/sent: {sent}')
+            return redirect('messaging_center')
+
+    logs = MessageLog.objects.all()[:100]
+    return render(request, 'inventory/messaging_center.html', {
+        'logs': logs,
+        'enabled': getattr(djsettings, 'MESSAGING_ENABLED', False),
+        'sms_provider': getattr(djsettings, 'SMS_PROVIDER', 'console'),
+        'wa_provider': getattr(djsettings, 'WHATSAPP_PROVIDER', 'console'),
+    })
+
+
+def _maybe_send_bill_message(request, bill_number, phone, total, paid, credit):
+    """Optional post-sale SMS/WhatsApp if phone present and user checked send_message."""
+    if not request.POST.get('send_message'):
+        return
+    if not phone:
+        return
+    channel = request.POST.get('message_channel') or 'sms'
+    body = (
+        f'Arslan Pharmacy Bill {bill_number}: Total Rs.{total}, Paid Rs.{paid}'
+        + (f', Credit Rs.{credit}' if credit else '')
+        + '. Thank you.'
+    )
+    try:
+        from inventory.messaging import dispatch
+        dispatch(channel, phone, body, user=request.user, purpose='bill', bill=bill_number)
+    except Exception:
+        pass
 
 def custom_404(request, exception=None):
     return render(request, 'inventory/404.html', status=404)
