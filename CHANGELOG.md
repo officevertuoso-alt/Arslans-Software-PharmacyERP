@@ -228,3 +228,20 @@ If you add more strings, run on a machine with gettext:
 
 ### Migration
 - `0014_pos_advanced.py`
+
+
+## [Phase 10] — 2026-10-26 — Pack/Loose + Generic alternates
+
+### Product
+- `generic_name` (salt) for search & alternates
+- Stock in **base units**; `units_per_pack` converts pack ↔ loose
+- `display_stock()` e.g. `2 pack + 3 loose`
+
+### POS
+- **Loose / unit** vs **Full pack** sale mode
+- Search by name, generic, barcode
+- **F4** alternates (same generic, in-stock)
+- Unit price = pack price / units_per_pack for loose lines
+
+### Migration
+- `0015_generic_pack.py`
