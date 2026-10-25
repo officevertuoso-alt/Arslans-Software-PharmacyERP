@@ -1,5 +1,5 @@
 from django.shortcuts import render, get_object_or_404, redirect
-from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment
+from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation
 from datetime import timedelta
 from django.utils import timezone
 from django.contrib import messages
@@ -246,17 +246,30 @@ def checkout(request):
         try:
             with transaction.atomic():
                 product = Product.objects.select_for_update().get(pk=product.pk)
-                if product.quantity < quantity:
-                    raise ValueError(
-                        f"Not enough {product.name} in stock. Available: {product.quantity}."
-                    )
                 if product.is_expired():
                     raise ValueError(f"{product.name} is expired and cannot be sold.")
 
-                product.quantity -= quantity
-                product.save(update_fields=['quantity'])
+                # FEFO: allocate from earliest-expiring non-expired batches
+                has_batches = product.batches.filter(is_active=True, quantity__gt=0).exists()
+                plan = []
+                if has_batches:
+                    plan = product.allocate_fefo(quantity)
+                    for batch, take in plan:
+                        batch.quantity -= take
+                        if batch.quantity == 0:
+                            batch.is_active = False
+                        batch.save(update_fields=['quantity', 'is_active'])
+                    product.sync_quantity_from_batches()
+                else:
+                    # Legacy path: product has no batches yet — use product.quantity
+                    if product.quantity < quantity:
+                        raise ValueError(
+                            f"Not enough {product.name} in stock. Available: {product.quantity}."
+                        )
+                    product.quantity -= quantity
+                    product.save(update_fields=['quantity'])
 
-                Purchase.objects.create(
+                sale = Purchase.objects.create(
                     product=product,
                     customer=request.user,
                     quantity=quantity,
@@ -265,6 +278,8 @@ def checkout(request):
                     amount_on_credit=credit_needed,
                     payment_method=payment_method,
                 )
+                for batch, take in plan:
+                    SaleBatchAllocation.objects.create(sale=sale, batch=batch, quantity=take)
 
                 if credit_needed > 0:
                     profile = CustomerProfile.objects.select_for_update().get(user=request.user)
@@ -516,6 +531,118 @@ def customer_ledger_detail(request, user_id):
         'profile': profile,
         'sales': sales,
         'payments': payments,
+        'currency': CURRENCY_SYMBOL,
+    })
+
+
+
+@admin_required
+def batch_list(request, product_id=None):
+    """List batches; optional filter by product."""
+    batches = ProductBatch.objects.select_related('product', 'supplier').order_by('expiry_date')
+    product = None
+    if product_id:
+        product = get_object_or_404(Product, pk=product_id)
+        batches = batches.filter(product=product)
+    return render(request, 'inventory/batch_list.html', {
+        'batches': batches,
+        'product': product,
+        'today': timezone.now().date(),
+        'currency': CURRENCY_SYMBOL,
+    })
+
+
+@admin_required
+def receive_batch(request, product_id=None):
+    """
+    Receive new stock as a batch (goods receipt).
+    Creates/updates ProductBatch and syncs Product.quantity.
+    """
+    product = None
+    if product_id:
+        product = get_object_or_404(Product, pk=product_id)
+
+    if request.method == 'POST':
+        try:
+            pid = int(request.POST.get('product_id') or (product.id if product else 0))
+            product = Product.objects.get(pk=pid)
+            batch_number = (request.POST.get('batch_number') or '').strip()
+            qty = int(request.POST.get('quantity', 0))
+            expiry = request.POST.get('expiry_date')
+            cost = Decimal(str(request.POST.get('purchase_cost') or '0')).quantize(Decimal('0.01'))
+            supplier_id = request.POST.get('supplier_id') or None
+            notes = (request.POST.get('notes') or '')[:255]
+        except Exception:
+            messages.error(request, "Invalid form data.")
+            return redirect('receive_batch')
+
+        if not batch_number or qty <= 0 or not expiry:
+            messages.error(request, "Batch number, quantity > 0 and expiry date are required.")
+            return redirect('receive_batch', product_id=product.id)
+
+        try:
+            with transaction.atomic():
+                product = Product.objects.select_for_update().get(pk=product.pk)
+                batch, created = ProductBatch.objects.select_for_update().get_or_create(
+                    product=product,
+                    batch_number=batch_number,
+                    defaults={
+                        'quantity': 0,
+                        'expiry_date': expiry,
+                        'purchase_cost': cost,
+                        'notes': notes,
+                        'is_active': True,
+                    }
+                )
+                if not created:
+                    # same batch number: add quantity, keep earliest expiry if already set
+                    batch.quantity += qty
+                    if cost > 0:
+                        batch.purchase_cost = cost
+                    if notes:
+                        batch.notes = notes
+                    batch.is_active = True
+                    batch.save()
+                else:
+                    batch.quantity = qty
+                    batch.expiry_date = expiry
+                    batch.purchase_cost = cost
+                    batch.notes = notes
+                    if supplier_id:
+                        batch.supplier_id = int(supplier_id)
+                    batch.save()
+
+                if supplier_id and not batch.supplier_id:
+                    batch.supplier_id = int(supplier_id)
+                    batch.save(update_fields=['supplier'])
+
+                # Also bump legacy product.quantity and optionally update product expiry to earliest batch
+                product.quantity = product.total_batch_quantity()
+                # Keep product.expiry_date as nearest upcoming expiry for alerts
+                nearest = (
+                    product.batches.filter(is_active=True, quantity__gt=0)
+                    .order_by('expiry_date').values_list('expiry_date', flat=True).first()
+                )
+                if nearest:
+                    product.expiry_date = nearest
+                product.save(update_fields=['quantity', 'expiry_date'])
+
+            messages.success(
+                request,
+                f"Received {qty} of {product.name} batch {batch_number}. "
+                f"Stock now {product.quantity}."
+            )
+            return redirect('batch_list_product', product_id=product.id)
+        except Exception as e:
+            messages.error(request, f"Could not receive batch: {e}")
+            return redirect('receive_batch', product_id=product.id if product else None)
+
+    products = Product.objects.all().order_by('name')
+    suppliers = Supplier.objects.all().order_by('name')
+    return render(request, 'inventory/receive_batch.html', {
+        'product': product,
+        'products': products,
+        'suppliers': suppliers,
         'currency': CURRENCY_SYMBOL,
     })
 
