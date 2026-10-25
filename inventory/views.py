@@ -1,5 +1,5 @@
 from django.shortcuts import render, get_object_or_404, redirect
-from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation, SupplierPurchase, SupplierPurchaseLine, SupplierPayment, CashbookEntry, MedicineMaster, AppNotification, CreditDue, StockAdjustment
+from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation, SupplierPurchase, SupplierPurchaseLine, SupplierPayment, CashbookEntry, MedicineMaster, AppNotification, CreditDue, StockAdjustment, PosShift
 from datetime import timedelta
 from django.utils import timezone
 from django.contrib import messages
@@ -1800,15 +1800,28 @@ def _pos_add_line(cart, product, qty=1, mode='unit'):
 
 @login_required
 def pos_screen(request):
+    shift = _open_shift(request)
+    if not shift:
+        messages.warning(request, 'Open a shift before using POS.')
+        return redirect('shift_open')
     cart = _pos_cart(request)
     count, total = _pos_totals(cart)
     held = request.session.get('pos_held', [])
+    # flag if any cart line needs Rx
+    needs_rx = False
+    for line in cart:
+        p = Product.objects.filter(pk=line['product_id']).first()
+        if p and (p.is_controlled or p.requires_rx):
+            needs_rx = True
+            break
     return render(request, 'inventory/pos.html', {
         'cart': cart,
         'cart_count': count,
         'cart_total': total,
         'currency': CURRENCY_SYMBOL,
         'held_bills': held,
+        'shift': shift,
+        'needs_rx': needs_rx,
     })
 
 
@@ -1999,7 +2012,27 @@ def pos_pay(request):
     else:
         amount_paid = payment_amount
 
-    if credit_needed > 0 and not profile.can_take_credit(credit_needed):
+    
+    # Controlled / Rx products in cart
+    needs_rx_items = []
+    for line in cart:
+        p = Product.objects.filter(pk=line['product_id']).first()
+        if p and (p.is_controlled or p.requires_rx):
+            needs_rx_items.append(p.name)
+    if needs_rx_items:
+        rx_number = (request.POST.get('rx_number') or '').strip()
+        rx_doctor = (request.POST.get('rx_doctor') or '').strip()
+        rx_patient = (request.POST.get('rx_patient') or '').strip()
+        if not rx_number or not rx_doctor:
+            messages.error(
+                request,
+                'Prescription required for: ' + ', '.join(needs_rx_items) + '. Enter Rx number and doctor.'
+            )
+            return redirect('pos_screen')
+    else:
+        rx_number = rx_doctor = rx_patient = ''
+
+if credit_needed > 0 and not profile.can_take_credit(credit_needed):
         messages.error(request, f"Credit limit exceeded. Available: {CURRENCY_SYMBOL}{profile.available_credit}.")
         return redirect('pos_screen')
 
@@ -2108,6 +2141,9 @@ def pos_pay(request):
                     walk_in_phone=walk_phone,
                     discount_amount=line_disc,
                     bill_number=bill_number,
+                    rx_number=rx_number if needs_rx_items else '',
+                    rx_doctor=rx_doctor if needs_rx_items else '',
+                    rx_patient=rx_patient if needs_rx_items else '',
                 )
                 last_sale = sale
                 for batch, take in plan:
@@ -2268,6 +2304,81 @@ def stock_adjust(request):
         'products': products,
         'recent': recent,
         'reasons': StockAdjustment.REASON_CHOICES,
+    })
+
+
+def _open_shift(request):
+    return PosShift.objects.filter(user=request.user, status=PosShift.STATUS_OPEN).first()
+
+
+@login_required
+def shift_open(request):
+    existing = _open_shift(request)
+    if existing:
+        messages.info(request, f'Shift already open since {existing.opened_at}.')
+        return redirect('pos_screen')
+    if request.method == 'POST':
+        try:
+            float_amt = Decimal(str(request.POST.get('opening_float') or '0')).quantize(Decimal('0.01'))
+        except Exception:
+            float_amt = Decimal('0.00')
+        PosShift.objects.create(user=request.user, opening_float=float_amt)
+        messages.success(request, 'Shift opened.')
+        return redirect('pos_screen')
+    return render(request, 'inventory/shift_open.html')
+
+
+@login_required
+def shift_close(request):
+    shift = _open_shift(request)
+    if not shift:
+        messages.error(request, 'No open shift.')
+        return redirect('pos_screen')
+    # Expected = opening float + cash sales in this shift - cash refunds approx from cashbook
+    sales_cash = Decimal('0.00')
+    for e in CashbookEntry.objects.filter(
+        created_by=request.user,
+        entry_type=CashbookEntry.TYPE_SALE,
+        created_at__gte=shift.opened_at,
+        payment_channel='cash',
+    ):
+        sales_cash += e.amount
+    recoveries = Decimal('0.00')
+    for e in CashbookEntry.objects.filter(
+        created_by=request.user,
+        entry_type=CashbookEntry.TYPE_CREDIT_RECOVERY,
+        created_at__gte=shift.opened_at,
+    ):
+        recoveries += e.amount
+    expected = (shift.opening_float + sales_cash + recoveries).quantize(Decimal('0.01'))
+
+    if request.method == 'POST':
+        try:
+            declared = Decimal(str(request.POST.get('closing_declared') or '0')).quantize(Decimal('0.01'))
+        except Exception:
+            messages.error(request, 'Invalid declared amount.')
+            return redirect('shift_close')
+        notes = (request.POST.get('notes') or '')[:255]
+        shift.closing_declared = declared
+        shift.expected_cash = expected
+        shift.variance = (declared - expected).quantize(Decimal('0.01'))
+        shift.status = PosShift.STATUS_CLOSED
+        shift.closed_at = timezone.now()
+        shift.notes = notes
+        shift.save()
+        _pos_save(request, [])  # clear cart
+        messages.success(
+            request,
+            f'Shift closed. Expected {CURRENCY_SYMBOL}{expected}, counted {CURRENCY_SYMBOL}{declared}, '
+            f'variance {CURRENCY_SYMBOL}{shift.variance}.'
+        )
+        return redirect('reports_dashboard')
+    return render(request, 'inventory/shift_close.html', {
+        'shift': shift,
+        'expected': expected,
+        'sales_cash': sales_cash,
+        'recoveries': recoveries,
+        'currency': CURRENCY_SYMBOL,
     })
 
 def custom_404(request, exception=None):
