@@ -1,5 +1,5 @@
 from django.shortcuts import render, get_object_or_404, redirect
-from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation, SupplierPurchase, SupplierPurchaseLine, SupplierPayment
+from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation, SupplierPurchase, SupplierPurchaseLine, SupplierPayment, CashbookEntry, MedicineMaster, AppNotification, CreditDue
 from datetime import timedelta
 from django.utils import timezone
 from django.contrib import messages
@@ -197,6 +197,27 @@ def checkout(request):
                 'quantity': quantity,
                 'total_cost': total_cost,
                 'currency': CURRENCY_SYMBOL,
+
+
+def post_cashbook(*, entry_type, amount, user=None, description='', reference='',
+                  payment_channel='cash', customer=None, supplier=None,
+                  expense_category=None, entry_date=None):
+    """Create a cashbook line. amount should already be signed (+ in, - out)."""
+    from decimal import Decimal as D
+    amount = D(str(amount)).quantize(D('0.01'))
+    return CashbookEntry.objects.create(
+        entry_type=entry_type,
+        amount=amount,
+        payment_channel=payment_channel or 'cash',
+        description=(description or '')[:255],
+        reference=(reference or '')[:64],
+        customer=customer,
+        supplier=supplier,
+        expense_category=expense_category,
+        created_by=user,
+        entry_date=entry_date or timezone.now().date(),
+    )
+
                 'profile': profile,
                 'change': None,
             })
@@ -280,6 +301,27 @@ def checkout(request):
                 )
                 for batch, take in plan:
                     SaleBatchAllocation.objects.create(sale=sale, batch=batch, quantity=take)
+                # Cashbook: cash/online in + credit given
+                if amount_paid > 0:
+                    post_cashbook(
+                        entry_type=CashbookEntry.TYPE_SALE,
+                        amount=amount_paid,
+                        user=request.user,
+                        description=f'Sale {product.name} x{quantity}',
+                        reference=str(sale.id),
+                        payment_channel='cash',
+                        customer=request.user,
+                    )
+                if credit_needed > 0:
+                    post_cashbook(
+                        entry_type=CashbookEntry.TYPE_CREDIT_GIVEN,
+                        amount=Decimal('0.00'),  # no cash movement; tracked for ledger clarity
+                        user=request.user,
+                        description=f'Udhaar {product.name} x{quantity} Rs.{credit_needed}',
+                        reference=str(sale.id),
+                        customer=request.user,
+                    )
+
 
                 if credit_needed > 0:
                     profile = CustomerProfile.objects.select_for_update().get(user=request.user)
@@ -1196,6 +1238,350 @@ def daily_closing(request):
         'returns': returns,
         'currency': CURRENCY_SYMBOL,
     })
+
+
+@admin_required
+def cashbook_list(request):
+    """Cashbook with tabs: All / In / Out / Expenses."""
+    tab = request.GET.get('tab', 'all')
+    day = request.GET.get('date')
+    qs = CashbookEntry.objects.select_related('customer', 'supplier', 'created_by')
+    if day:
+        qs = qs.filter(entry_date=day)
+    if tab == 'in':
+        qs = qs.filter(amount__gt=0)
+    elif tab == 'out':
+        qs = qs.filter(amount__lt=0)
+    elif tab == 'expenses':
+        qs = qs.filter(entry_type=CashbookEntry.TYPE_EXPENSE)
+
+    if request.method == 'POST':
+        # Manual expense / other entry
+        try:
+            et = request.POST.get('entry_type', CashbookEntry.TYPE_EXPENSE)
+            amt = Decimal(str(request.POST.get('amount', '0'))).quantize(Decimal('0.01'))
+            if et == CashbookEntry.TYPE_EXPENSE and amt > 0:
+                amt = -amt  # expenses are outflow
+            cat = request.POST.get('expense_category') or None
+            desc = (request.POST.get('description') or '')[:255]
+            channel = request.POST.get('payment_channel', 'cash')
+            post_cashbook(
+                entry_type=et,
+                amount=amt,
+                user=request.user,
+                description=desc,
+                payment_channel=channel,
+                expense_category=cat if et == CashbookEntry.TYPE_EXPENSE else None,
+            )
+            messages.success(request, "Cashbook entry saved.")
+            return redirect('cashbook_list')
+        except Exception as e:
+            messages.error(request, f"Failed: {e}")
+
+    entries = qs[:200]
+    total_in = sum((e.amount for e in qs.filter(amount__gt=0)[:5000]), Decimal('0'))
+    total_out = sum((e.amount for e in qs.filter(amount__lt=0)[:5000]), Decimal('0'))
+    return render(request, 'inventory/cashbook.html', {
+        'entries': entries,
+        'tab': tab,
+        'day': day or '',
+        'total_in': total_in.quantize(Decimal('0.01')),
+        'total_out': total_out.quantize(Decimal('0.01')),
+        'net': (total_in + total_out).quantize(Decimal('0.01')),
+        'currency': CURRENCY_SYMBOL,
+        'expense_choices': CashbookEntry.EXPENSE_CHOICES,
+    })
+
+
+@admin_required
+def charts_dashboard(request):
+    """LalanaChami-style sales charts using Chart.js (no external Mongo embed)."""
+    return render(request, 'inventory/charts_dashboard.html', {'currency': CURRENCY_SYMBOL})
+
+
+@admin_required
+def charts_data_api(request):
+    """JSON for Chart.js: monthly sales, top products, cash in/out by day."""
+    from django.http import JsonResponse
+    from django.db.models.functions import TruncMonth, TruncDate
+    from django.db.models import Sum, Count
+
+    # Monthly sales (last 12 months)
+    monthly = (
+        Purchase.objects.annotate(m=TruncMonth('purchase_date'))
+        .values('m')
+        .annotate(total=Sum('total_price'), bills=Count('id'))
+        .order_by('m')
+    )
+    monthly_labels = []
+    monthly_totals = []
+    for row in monthly:
+        if row['m']:
+            monthly_labels.append(row['m'].strftime('%Y-%m'))
+            monthly_totals.append(float(row['total'] or 0))
+
+    # Top 10 products by revenue
+    top = (
+        Purchase.objects.values('product__name')
+        .annotate(total=Sum('total_price'), qty=Sum('quantity'))
+        .order_by('-total')[:10]
+    )
+    top_labels = [r['product__name'] or '?' for r in top]
+    top_totals = [float(r['total'] or 0) for r in top]
+
+    # Cashbook last 14 days
+    from datetime import timedelta
+    start = timezone.now().date() - timedelta(days=13)
+    cb = (
+        CashbookEntry.objects.filter(entry_date__gte=start)
+        .values('entry_date')
+        .annotate(net=Sum('amount'))
+        .order_by('entry_date')
+    )
+    cb_labels = [r['entry_date'].isoformat() for r in cb]
+    cb_nets = [float(r['net'] or 0) for r in cb]
+
+    return JsonResponse({
+        'monthly': {'labels': monthly_labels, 'totals': monthly_totals},
+        'top_products': {'labels': top_labels, 'totals': top_totals},
+        'cashbook': {'labels': cb_labels, 'nets': cb_nets},
+    })
+
+
+@admin_required
+def medicine_master_list(request):
+    q = (request.GET.get('q') or '').strip()
+    qs = MedicineMaster.objects.filter(is_active=True)
+    if q:
+        from django.db import models as djmodels
+        qs = qs.filter(
+            djmodels.Q(product_name__icontains=q) |
+            djmodels.Q(brand_name__icontains=q) |
+            djmodels.Q(company__icontains=q)
+        )[:100]
+    else:
+        qs = qs[:50]
+    return render(request, 'inventory/medicine_master_list.html', {
+        'items': qs,
+        'q': q,
+        'currency': CURRENCY_SYMBOL,
+        'total_catalog': MedicineMaster.objects.count(),
+    })
+
+
+@admin_required
+def medicine_master_suggest(request):
+    """AJAX autocomplete for purchase form."""
+    from django.http import JsonResponse
+    from django.db import models as djmodels
+    q = (request.GET.get('q') or '').strip()
+    if len(q) < 2:
+        return JsonResponse({'results': []})
+    rows = MedicineMaster.objects.filter(
+        djmodels.Q(product_name__icontains=q) | djmodels.Q(brand_name__icontains=q),
+        is_active=True,
+    )[:20]
+    results = [{
+        'id': r.id,
+        'label': r.product_name,
+        'brand': r.brand_name,
+        'company': r.company,
+        'pack': r.pack_size,
+        'form': r.dosage_form,
+        'mrp': float(r.current_mrp or r.legacy_retail_price or 0),
+        'trade': float(r.legacy_trade_price or 0),
+    } for r in rows]
+    return JsonResponse({'results': results})
+
+
+@admin_required
+def medicine_master_export(request):
+    """Export catalog as CSV."""
+    import csv
+    from django.http import HttpResponse
+    resp = HttpResponse(content_type='text/csv')
+    resp['Content-Disposition'] = 'attachment; filename="medicine_master.csv"'
+    w = csv.writer(resp)
+    w.writerow(['product_name', 'brand_name', 'ingredients', 'company', 'strength',
+                'dosage_form', 'pack_size', 'therapeutic_group', 'legacy_retail_price',
+                'legacy_trade_price', 'current_mrp'])
+    for r in MedicineMaster.objects.iterator(chunk_size=2000):
+        w.writerow([
+            r.product_name, r.brand_name, r.ingredients, r.company, r.strength,
+            r.dosage_form, r.pack_size, r.therapeutic_group,
+            r.legacy_retail_price or '', r.legacy_trade_price or '', r.current_mrp or '',
+        ])
+    return resp
+
+
+@admin_required
+def medicine_master_import(request):
+    """Bulk import CSV or XLSX (first sheet). Does not create stock."""
+    if request.method == 'POST' and request.FILES.get('file'):
+        f = request.FILES['file']
+        name = f.name.lower()
+        created = 0
+        try:
+            rows = []
+            if name.endswith('.csv'):
+                import csv, io
+                text = f.read().decode('utf-8', errors='ignore')
+                reader = csv.DictReader(io.StringIO(text))
+                rows = list(reader)
+            elif name.endswith(('.xlsx', '.xls')):
+                try:
+                    import openpyxl
+                except ImportError:
+                    messages.error(request, "openpyxl required: pip install openpyxl")
+                    return redirect('medicine_master_list')
+                wb = openpyxl.load_workbook(f, read_only=True, data_only=True)
+                ws = wb.active
+                headers = [str(c.value or '').strip() for c in next(ws.iter_rows(min_row=1, max_row=1))]
+                for row in ws.iter_rows(min_row=2, values_only=True):
+                    rows.append(dict(zip(headers, row)))
+            else:
+                messages.error(request, "Upload CSV or XLSX only.")
+                return redirect('medicine_master_list')
+
+            def pick(d, *keys):
+                for k in keys:
+                    for dk, dv in d.items():
+                        if dk and str(dk).strip().lower() == k.lower() and dv not in (None, ''):
+                            return str(dv).strip()
+                return ''
+
+            def money(val):
+                try:
+                    return Decimal(str(val).replace(',', '')).quantize(Decimal('0.01'))
+                except Exception:
+                    return None
+
+            batch = []
+            for d in rows:
+                pname = pick(d, 'product_name', 'Product Name', 'name')
+                if not pname:
+                    continue
+                batch.append(MedicineMaster(
+                    product_name=pname[:255],
+                    brand_name=pick(d, 'brand_name', 'Brand Name')[:120],
+                    ingredients=pick(d, 'ingredients', 'Ingredients / Salt')[:500],
+                    company=pick(d, 'company', 'Company / Manufacturer')[:200],
+                    strength=pick(d, 'strength', 'Strength')[:120],
+                    dosage_form=pick(d, 'dosage_form', 'Dosage Form')[:80],
+                    pack_size=pick(d, 'pack_size', 'Pack Size')[:80],
+                    therapeutic_group=pick(d, 'therapeutic_group', 'Therapeutic Group (approx.)')[:120],
+                    legacy_retail_price=money(pick(d, 'legacy_retail_price', 'Legacy Retail Price (PKR) - OLD, not Oct 2026')),
+                    legacy_trade_price=money(pick(d, 'legacy_trade_price', 'Legacy Trade Price (PKR) - OLD')),
+                    current_mrp=money(pick(d, 'current_mrp', 'Current MRP (PKR) - enter from pack / DRAP')),
+                ))
+                if len(batch) >= 500:
+                    MedicineMaster.objects.bulk_create(batch, ignore_conflicts=True)
+                    created += len(batch)
+                    batch = []
+            if batch:
+                MedicineMaster.objects.bulk_create(batch, ignore_conflicts=True)
+                created += len(batch)
+            messages.success(request, f"Imported ~{created} master rows (catalog only, not stock).")
+        except Exception as e:
+            messages.error(request, f"Import failed: {e}")
+        return redirect('medicine_master_list')
+    return render(request, 'inventory/medicine_master_import.html')
+
+
+@admin_required
+def notifications_list(request):
+    from django.db import models as djmodels
+    notes = AppNotification.objects.filter(
+        djmodels.Q(user__isnull=True) | djmodels.Q(user=request.user)
+    )[:100]
+    if request.GET.get('mark') == 'all':
+        AppNotification.objects.filter(
+            djmodels.Q(user__isnull=True) | djmodels.Q(user=request.user),
+            is_read=False,
+        ).update(is_read=True)
+        return redirect('notifications_list')
+    return render(request, 'inventory/notifications.html', {'notes': notes})
+
+
+@admin_required
+def notifications_poll(request):
+    """JSON feed for desktop Notification API + badge."""
+    from django.http import JsonResponse
+    from django.db import models as djmodels
+    unread = AppNotification.objects.filter(
+        djmodels.Q(user__isnull=True) | djmodels.Q(user=request.user),
+        is_read=False,
+    ).order_by('-created_at')[:20]
+    data = [{
+        'id': n.id,
+        'kind': n.kind,
+        'title': n.title,
+        'message': n.message,
+        'link': n.link,
+        'created': n.created_at.isoformat(),
+    } for n in unread]
+    return JsonResponse({'count': len(data), 'items': data})
+
+
+@admin_required
+def refresh_alerts(request):
+    """Generate in-app notifications for expiry, credit due, today's sales."""
+    today = timezone.now().date()
+    soon = today + timedelta(days=7)
+    created = 0
+
+    # Near expiry batches
+    near = ProductBatch.objects.filter(
+        is_active=True, quantity__gt=0, expiry_date__gte=today, expiry_date__lte=soon
+    ).select_related('product')[:50]
+    if near.exists():
+        names = ', '.join(f"{b.product.name}({b.expiry_date})" for b in near[:5])
+        AppNotification.objects.create(
+            kind=AppNotification.KIND_EXPIRY,
+            title=f'{near.count()} products near expiry',
+            message=names,
+            link='/batches/',
+        )
+        created += 1
+
+    expired = ProductBatch.objects.filter(
+        is_active=True, quantity__gt=0, expiry_date__lt=today
+    ).count()
+    if expired:
+        AppNotification.objects.create(
+            kind=AppNotification.KIND_EXPIRY,
+            title=f'{expired} expired batches still in stock',
+            message='Review and quarantine expired stock.',
+            link='/expired/',
+        )
+        created += 1
+
+    # Credit dues today / overdue
+    dues = CreditDue.objects.filter(is_settled=False, due_date__lte=today).select_related('customer')[:30]
+    for d in dues:
+        AppNotification.objects.create(
+            kind=AppNotification.KIND_CREDIT_DUE,
+            title=f'Credit due: {d.customer.username} Rs.{d.amount}',
+            message=f'Due date {d.due_date}. Phone: {d.phone or "—"}',
+            link=f'/customers/ledger/{d.customer_id}/',
+            user=request.user,
+        )
+        created += 1
+
+    # Today's sales summary
+    sales = Purchase.objects.filter(purchase_date__date=today)
+    if sales.exists():
+        total = sum((s.total_price for s in sales), Decimal('0'))
+        AppNotification.objects.create(
+            kind=AppNotification.KIND_SALES,
+            title=f'Today sales: Rs.{total.quantize(Decimal("0.01"))}',
+            message=f'{sales.count()} bills recorded today.',
+            link='/reports/daily-closing/',
+        )
+        created += 1
+
+    messages.success(request, f"Generated {created} notifications.")
+    return redirect('notifications_list')
 
 def custom_404(request, exception=None):
     return render(request, 'inventory/404.html', status=404)
