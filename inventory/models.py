@@ -1,10 +1,14 @@
 from django.db import models
 from django.utils import timezone
 from django.contrib.auth.models import User
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from decimal import Decimal
 import barcode
 from barcode.writer import ImageWriter
 from io import BytesIO
 from django.core.files import File
+
 
 class Supplier(models.Model):
     name = models.CharField(max_length=100)
@@ -15,6 +19,7 @@ class Supplier(models.Model):
 
     def __str__(self):
         return self.name
+
 
 class Product(models.Model):
     name = models.CharField(max_length=100)
@@ -61,22 +66,130 @@ class Product(models.Model):
             self.barcode.save(f'{self.id}.png', File(buffer), save=False)
         super().save(*args, **kwargs)
 
-class Purchase(models.Model):
-    product = models.ForeignKey(Product, on_delete=models.CASCADE)
-    customer = models.ForeignKey(User, on_delete=models.CASCADE)
-    quantity = models.PositiveIntegerField()
-    total_price = models.DecimalField(max_digits=10, decimal_places=2)
-    purchase_date = models.DateTimeField(auto_now_add=True)
+
+class CustomerProfile(models.Model):
+    """Pharmacy customer profile for credit (udhaar) tracking.
+    balance > 0 means customer owes the pharmacy.
+    """
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='customer_profile')
+    phone = models.CharField(max_length=20, blank=True)
+    address = models.TextField(blank=True)
+    credit_limit = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('5000.00'),
+        help_text='Maximum allowed udhaar (Rs.)'
+    )
+    balance = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        help_text='Current outstanding balance (Rs.). Positive = customer owes.'
+    )
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Customer Profile'
+        verbose_name_plural = 'Customer Profiles'
 
     def __str__(self):
-        return f"Purchase of {self.quantity} x {self.product.name} by {self.customer.username} on {self.purchase_date.strftime('%Y-%m-%d %H:%M')}"
+        return f"{self.user.username} — Rs.{self.balance}"
+
+    @property
+    def available_credit(self):
+        return (self.credit_limit - self.balance).quantize(Decimal('0.01'))
+
+    def can_take_credit(self, amount):
+        amount = Decimal(str(amount)).quantize(Decimal('0.01'))
+        return amount <= self.available_credit
+
+
+@receiver(post_save, sender=User)
+def create_customer_profile(sender, instance, created, **kwargs):
+    if created:
+        CustomerProfile.objects.get_or_create(user=instance)
+
+
+class Purchase(models.Model):
+    """Customer sale record (historically named Purchase).
+    Tracks full/partial payment and credit (udhaar) portion.
+    """
+    PAYMENT_CASH = 'cash'
+    PAYMENT_CARD = 'card'
+    PAYMENT_CREDIT = 'credit'
+    PAYMENT_SPLIT = 'split'
+    PAYMENT_CHOICES = [
+        (PAYMENT_CASH, 'Cash'),
+        (PAYMENT_CARD, 'Card / Bank'),
+        (PAYMENT_CREDIT, 'Credit (Udhaar)'),
+        (PAYMENT_SPLIT, 'Split (Partial + Credit)'),
+    ]
+
+    product = models.ForeignKey(Product, on_delete=models.CASCADE)
+    customer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sales')
+    quantity = models.PositiveIntegerField()
+    total_price = models.DecimalField(max_digits=10, decimal_places=2)
+    amount_paid = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal('0.00'),
+        help_text='Amount received at time of sale (Rs.)'
+    )
+    amount_on_credit = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal('0.00'),
+        help_text='Amount added to customer udhaar (Rs.)'
+    )
+    payment_method = models.CharField(
+        max_length=10, choices=PAYMENT_CHOICES, default=PAYMENT_CASH
+    )
+    purchase_date = models.DateTimeField(auto_now_add=True)
+    notes = models.CharField(max_length=255, blank=True)
+
+    class Meta:
+        ordering = ['-purchase_date']
+        verbose_name = 'Sale'
+        verbose_name_plural = 'Sales'
+
+    def __str__(self):
+        return (
+            f"Sale of {self.quantity} x {self.product.name} by "
+            f"{self.customer.username} on {self.purchase_date.strftime('%Y-%m-%d %H:%M')}"
+        )
+
+    @property
+    def is_fully_paid(self):
+        return self.amount_on_credit <= 0
+
+
+class CustomerPayment(models.Model):
+    """Payment received against customer udhaar balance."""
+    customer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='credit_payments')
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    payment_method = models.CharField(
+        max_length=10,
+        choices=[('cash', 'Cash'), ('card', 'Card / Bank'), ('other', 'Other')],
+        default='cash'
+    )
+    received_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='received_payments'
+    )
+    notes = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Payment Rs.{self.amount} from {self.customer.username} on {self.created_at.date()}"
+
 
 class Return(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
     customer = models.ForeignKey(User, on_delete=models.CASCADE)
     quantity = models.PositiveIntegerField()
     reason = models.TextField()
-    status = models.CharField(max_length=10, choices=[("Pending", "Pending"), ("Approved", "Approved"), ("Rejected", "Rejected")], default="Pending")
+    status = models.CharField(
+        max_length=10,
+        choices=[("Pending", "Pending"), ("Approved", "Approved"), ("Rejected", "Rejected")],
+        default="Pending"
+    )
     date_requested = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
