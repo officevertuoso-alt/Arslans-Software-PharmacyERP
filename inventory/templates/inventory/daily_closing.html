@@ -1,0 +1,41 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Daily Closing - Arslan's Software{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h2>Daily closing — {{ day }}</h2>
+  <form method="get" class="row g-2 mb-3" style="max-width:360px">
+    <div class="col-auto"><input type="date" name="date" value="{{ day|date:'Y-m-d' }}" class="form-control"></div>
+    <div class="col-auto"><button class="btn btn-primary">Show</button></div>
+  </form>
+
+  <div class="row g-3 mb-3">
+    <div class="col-md-3"><div class="card card-body"><small>Sales total</small><h4>{{ currency }}{{ sales_total|floatformat:2 }}</h4></div></div>
+    <div class="col-md-3"><div class="card card-body"><small>Cash from sales</small><h4>{{ currency }}{{ cash_in|floatformat:2 }}</h4></div></div>
+    <div class="col-md-3"><div class="card card-body"><small>New udhaar</small><h4>{{ currency }}{{ credit_new|floatformat:2 }}</h4></div></div>
+    <div class="col-md-3"><div class="card card-body border-success"><small>Net cash movement</small><h4>{{ currency }}{{ net_cash|floatformat:2 }}</h4></div></div>
+  </div>
+  <p>
+    Udhaar collected: {{ currency }}{{ udhaar_collected|floatformat:2 }} ·
+    Paid to suppliers: {{ currency }}{{ supplier_paid|floatformat:2 }} ·
+    Cash refunds: {{ currency }}{{ refunds|floatformat:2 }}
+  </p>
+
+  <h5>Sales ({{ sales|length }})</h5>
+  <table class="table table-sm table-striped">
+    <thead><tr><th>Time</th><th>Product</th><th>Qty</th><th>Total</th><th>Paid</th><th>Credit</th></tr></thead>
+    <tbody>
+    {% for s in sales %}
+      <tr>
+        <td>{{ s.purchase_date|time:"H:i" }}</td>
+        <td>{{ s.product.name }}</td>
+        <td>{{ s.quantity }}</td>
+        <td>{{ currency }}{{ s.total_price|floatformat:2 }}</td>
+        <td>{{ currency }}{{ s.amount_paid|floatformat:2 }}</td>
+        <td>{{ currency }}{{ s.amount_on_credit|floatformat:2 }}</td>
+      </tr>
+    {% empty %}<tr><td colspan="6">No sales.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  <a href="{% url 'reports_dashboard' %}" class="btn btn-secondary">Back to reports</a>
+</div>
+{% endblock %}
