@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment
+from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation
 
 
 @admin.register(Product)
@@ -39,3 +39,17 @@ class CustomerPaymentAdmin(admin.ModelAdmin):
     list_display = ('customer', 'amount', 'payment_method', 'received_by', 'created_at')
     list_filter = ('payment_method', 'created_at')
     search_fields = ('customer__username',)
+
+
+@admin.register(ProductBatch)
+class ProductBatchAdmin(admin.ModelAdmin):
+    list_display = ('product', 'batch_number', 'quantity', 'expiry_date', 'purchase_cost', 'is_active', 'received_date')
+    list_filter = ('is_active', 'expiry_date', 'product__category')
+    search_fields = ('batch_number', 'product__name')
+    raw_id_fields = ('product', 'supplier')
+
+
+@admin.register(SaleBatchAllocation)
+class SaleBatchAllocationAdmin(admin.ModelAdmin):
+    list_display = ('sale', 'batch', 'quantity')
+    raw_id_fields = ('sale', 'batch')
