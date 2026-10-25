@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Receipt {{ bill_number }}</title>
+  <style>
+    @page { size: 80mm auto; margin: 4mm; }
+    body { font-family: ui-monospace, monospace; font-size: 12px; width: 72mm; margin: 0 auto; }
+    h1 { font-size: 14px; text-align: center; margin: 0 0 4px; }
+    .muted { color: #444; text-align: center; }
+    table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+    td { padding: 2px 0; vertical-align: top; }
+    .r { text-align: right; }
+    .tot { font-weight: bold; border-top: 1px dashed #000; padding-top: 4px; }
+    .actions { text-align: center; margin-top: 12px; }
+    @media print { .actions { display: none; } body { width: auto; } }
+  </style>
+</head>
+<body>
+  <h1>Arslan's Software Pharmacy</h1>
+  <div class="muted">Pakistan · PKR</div>
+  <div class="muted">Bill: {{ bill_number }}</div>
+  <div class="muted">{{ when|date:"Y-m-d H:i" }}</div>
+  {% if walk_in_name %}<div>Customer: {{ walk_in_name }} {% if walk_in_phone %}({{ walk_in_phone }}){% endif %}</div>{% endif %}
+  <table>
+    {% for l in lines %}
+    <tr>
+      <td>{{ l.product.name }} x{{ l.quantity }}</td>
+      <td class="r">{{ l.total_price|floatformat:2 }}</td>
+    </tr>
+    {% if l.discount_amount %}
+    <tr><td class="muted">  discount</td><td class="r">-{{ l.discount_amount|floatformat:2 }}</td></tr>
+    {% endif %}
+    {% endfor %}
+    <tr class="tot"><td>Subtotal</td><td class="r">{{ subtotal|floatformat:2 }}</td></tr>
+    {% if discount %}<tr><td>Discount</td><td class="r">-{{ discount|floatformat:2 }}</td></tr>{% endif %}
+    <tr class="tot"><td>TOTAL</td><td class="r">{{ total|floatformat:2 }}</td></tr>
+    <tr><td>Paid</td><td class="r">{{ paid|floatformat:2 }}</td></tr>
+    {% if credit %}<tr><td>On credit</td><td class="r">{{ credit|floatformat:2 }}</td></tr>{% endif %}
+  </table>
+  <div class="muted">Thank you · Get well soon</div>
+  <div class="actions">
+    <button onclick="window.print()">Print</button>
+    <a href="/pos/">Back to POS</a>
+  </div>
+  <script>window.onload = function(){ setTimeout(function(){ window.print(); }, 300); }</script>
+</body>
+</html>
