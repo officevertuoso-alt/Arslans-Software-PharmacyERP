@@ -1,0 +1,51 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Stock Adjustment{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h2>Stock adjustment</h2>
+  <p class="text-muted">Physical count, damage, or expiry write-off. Reductions use FEFO when batches exist.</p>
+  <form method="post" class="card card-body mb-4" style="max-width:560px">
+    {% csrf_token %}
+    <div class="mb-2">
+      <label class="form-label">Product</label>
+      <select name="product_id" class="form-select" required>
+        <option value="">— select —</option>
+        {% for p in products %}
+          <option value="{{ p.id }}">{{ p.name }} (qty {{ p.quantity }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="mb-2">
+      <label class="form-label">New quantity (after count)</label>
+      <input type="number" name="quantity_after" class="form-control" min="0" required>
+    </div>
+    <div class="mb-2">
+      <label class="form-label">Reason</label>
+      <select name="reason" class="form-select">
+        {% for v,l in reasons %}<option value="{{ v }}">{{ l }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="mb-2">
+      <label class="form-label">Notes</label>
+      <input type="text" name="notes" class="form-control" maxlength="255">
+    </div>
+    <button class="btn btn-warning">Save adjustment</button>
+  </form>
+  <h5>Recent</h5>
+  <table class="table table-sm">
+    <thead><tr><th>When</th><th>Product</th><th>Before</th><th>After</th><th>Δ</th><th>Reason</th></tr></thead>
+    <tbody>
+    {% for a in recent %}
+      <tr>
+        <td>{{ a.created_at|date:"Y-m-d H:i" }}</td>
+        <td>{{ a.product.name }}</td>
+        <td>{{ a.quantity_before }}</td>
+        <td>{{ a.quantity_after }}</td>
+        <td>{{ a.quantity_delta }}</td>
+        <td>{{ a.get_reason_display }}</td>
+      </tr>
+    {% empty %}<tr><td colspan="6">None yet</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
