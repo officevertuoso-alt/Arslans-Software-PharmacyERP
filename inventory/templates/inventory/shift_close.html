@@ -1,0 +1,26 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Close Shift{% endblock %}
+{% block content %}
+<div class="container py-4" style="max-width:520px">
+  <h2>Close shift</h2>
+  <p>Opened: {{ shift.opened_at }}</p>
+  <ul>
+    <li>Opening float: {{ currency }}{{ shift.opening_float }}</li>
+    <li>Cash sales this shift: {{ currency }}{{ sales_cash }}</li>
+    <li>Udhaar recoveries: {{ currency }}{{ recoveries }}</li>
+    <li><strong>Expected in drawer: {{ currency }}{{ expected }}</strong></li>
+  </ul>
+  <form method="post" class="card card-body">
+    {% csrf_token %}
+    <div class="mb-3">
+      <label class="form-label">Counted cash (Rs.)</label>
+      <input type="number" step="0.01" min="0" name="closing_declared" class="form-control form-control-lg" required>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Notes</label>
+      <input type="text" name="notes" class="form-control" maxlength="255">
+    </div>
+    <button class="btn btn-danger btn-lg w-100" onclick="return confirm('Close shift?');">Close shift</button>
+  </form>
+</div>
+{% endblock %}
