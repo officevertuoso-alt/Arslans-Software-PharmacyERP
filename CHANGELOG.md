@@ -208,3 +208,23 @@ If you add more strings, run on a machine with gettext:
 - Keyboard: F2 search, Enter add, ↑↓ cart, +/- qty, Del remove, F12 pay
 - Payment: Cash / Online / Credit / Partial + due phone fields
 - Atomic multi-line FEFO sale + cashbook + CreditDue
+
+
+## [Phase 9] — 2026-10-26 — Receipt, Hold, Discount, Barcode, Stock Adj
+
+### POS
+- **F9 Hold bill** / recall list
+- **Bill discount** distributed across lines
+- **Walk-in name** on bill
+- **Bill number** `BYYYYMMDD####`
+- After pay → **printable receipt** (80mm CSS + auto print)
+- Scan by **barcode_number** field
+
+### Product
+- `barcode_number`, `units_per_pack`, `allow_loose`
+
+### Stock
+- `/stock-adjust/` count / damage / expiry write-off (FEFO on reduce)
+
+### Migration
+- `0014_pos_advanced.py`
