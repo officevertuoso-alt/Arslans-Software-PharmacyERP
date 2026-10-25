@@ -1,0 +1,147 @@
+# Arslan's Software Pharmacy ERP — Urdu translations
+msgid ""
+msgstr ""
+"Project-Id-Version: Arslans-Software-PharmacyERP 1.0\n"
+"Language: ur\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Arslan's Software — Pharmacy ERP"
+msgstr "ارسلان سافٹ ویئر — فارمیسی ERP"
+
+msgid "Arslan's Software"
+msgstr "ارسلان سافٹ ویئر"
+
+msgid "Shop"
+msgstr "خریداری"
+
+msgid "My Ledger"
+msgstr "میرا کھاتہ"
+
+msgid "Products"
+msgstr "مصنوعات"
+
+msgid "Suppliers"
+msgstr "سپلائرز"
+
+msgid "Purchases"
+msgstr "خریداری (سپلائر)"
+
+msgid "Batches"
+msgstr "بیچز / لاٹ"
+
+msgid "Udhaar"
+msgstr "ادھار"
+
+msgid "Returns"
+msgstr "واپسی"
+
+msgid "Reports"
+msgstr "رپورٹس"
+
+msgid "Welcome"
+msgstr "خوش آمدید"
+
+msgid "Logout"
+msgstr "لاگ آؤٹ"
+
+msgid "Login"
+msgstr "لاگ اِن"
+
+msgid "Sign up"
+msgstr "سائن اپ"
+
+msgid "Checkout"
+msgstr "ادائیگی"
+
+msgid "Product"
+msgstr "پروڈکٹ"
+
+msgid "Quantity"
+msgstr "مقدار"
+
+msgid "Total Cost"
+msgstr "کل رقم"
+
+msgid "Payment Amount"
+msgstr "ادائیگی کی رقم"
+
+msgid "Pay"
+msgstr "ادا کریں"
+
+msgid "Back to Shop"
+msgstr "دکان پر واپس"
+
+msgid "Low stock"
+msgstr "کم اسٹاک"
+
+msgid "Expired"
+msgstr "ختم شدہ"
+
+msgid "Expiring Soon"
+msgstr "جلد ختم"
+
+msgid "Backup"
+msgstr "بیک اپ"
+
+msgid "Restore"
+msgstr "بحال کریں"
+
+msgid "Daily closing"
+msgstr "روزانہ کلوزنگ"
+
+msgid "Customer"
+msgstr "گاہک"
+
+msgid "Balance"
+msgstr "بقیہ"
+
+msgid "Credit limit"
+msgstr "ادھار کی حد"
+
+msgid "Receive payment"
+msgstr "ادائیگی وصول کریں"
+
+msgid "Invoice number"
+msgstr "انوائس نمبر"
+
+msgid "Supplier"
+msgstr "سپلائر"
+
+msgid "Save"
+msgstr "محفوظ کریں"
+
+msgid "Cancel"
+msgstr "منسوخ"
+
+msgid "Approve"
+msgstr "منظور"
+
+msgid "Reject"
+msgstr "مسترد"
+
+msgid "Cash refund"
+msgstr "نقد واپسی"
+
+msgid "Credit to udhaar balance"
+msgstr "ادھار کھاتہ میں کریڈٹ"
+
+msgid "Restock"
+msgstr "اسٹاک واپس"
+
+msgid "Home"
+msgstr "ہوم"
+
+msgid "Price"
+msgstr "قیمت"
+
+msgid "Add to cart"
+msgstr "کارٹ میں ڈالیں"
+
+msgid "Stock"
+msgstr "اسٹاک"
+
+msgid "Category"
+msgstr "قسم"
