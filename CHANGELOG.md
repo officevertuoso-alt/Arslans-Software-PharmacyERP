@@ -261,3 +261,18 @@ If you add more strings, run on a machine with gettext:
 
 ### Migration
 - `0016_controlled_shift.py`
+
+
+## [Phase 12] — 2026-10-26 — Candela-style F1 Product Help + Medicine preload
+
+### POS
+- **F1 Product Help** modal: searchable grid (Stock + Master catalog)
+- Columns: type, name, generic/salt, brand, price, stock
+- Keyboard: ↑↓ Enter in help grid
+- Master row → create Product SKU qty=0 (stock via purchase)
+
+### Catalog preload
+- `python manage.py preload_medicines [xlsx]`
+- UI: `/medicine-master/preload/`
+- Imports Pakistan Medicine Master List (~41k) into MedicineMaster
+- **Not stock** — Candela-style preloaded drug list for search
