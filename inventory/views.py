@@ -159,7 +159,7 @@ def purchase_product(request, pk):
                 'product_id': product.pk,
                 'quantity': quantity_to_buy,
                 'total_cost': str(total_cost) # Store as string to avoid Decimal serialization issues
-            }
+            , 'is_loose': request.POST.get('is_loose') == '1'}
             return redirect('checkout')
         else:
             messages.error(request, f"Not enough {product.name} in stock. Available: {product.quantity}.")
@@ -242,6 +242,26 @@ def post_cashbook(*, entry_type, amount, user=None, description='', reference=''
             change = Decimal('0.00')
             amount_paid = payment_amount
 
+        if credit_needed > 0:
+            phone_pre = (request.POST.get('customer_phone') or '').strip()
+            due_pre = (request.POST.get('due_date') or '').strip()
+            if not phone_pre or not due_pre:
+                messages.error(request, "Phone and due date are required when paying less than total (credit/partial).")
+                return render(request, 'inventory/checkout.html', {
+                    'product': product, 'quantity': quantity, 'total_cost': total_cost,
+                    'currency': CURRENCY_SYMBOL, 'profile': profile, 'change': None,
+                    'is_loose': request.session.get('purchase_info', {}).get('is_loose', False),
+                })
+            try:
+                date.fromisoformat(due_pre)
+            except ValueError:
+                messages.error(request, "Invalid due date format.")
+                return render(request, 'inventory/checkout.html', {
+                    'product': product, 'quantity': quantity, 'total_cost': total_cost,
+                    'currency': CURRENCY_SYMBOL, 'profile': profile, 'change': None,
+                    'is_loose': request.session.get('purchase_info', {}).get('is_loose', False),
+                })
+
         if credit_needed > 0 and not profile.can_take_credit(credit_needed):
             messages.error(
                 request,
@@ -322,6 +342,24 @@ def post_cashbook(*, entry_type, amount, user=None, description='', reference=''
                         customer=request.user,
                     )
 
+                if credit_needed > 0:
+                    phone = (request.POST.get('customer_phone') or '').strip()
+                    due_raw = (request.POST.get('due_date') or '').strip()
+                    if not phone or not due_raw:
+                        raise ValueError('Phone and due date are required for credit / partial payment.')
+                    due_date = date.fromisoformat(due_raw)
+                    if phone:
+                        profile.phone = phone
+                        profile.save(update_fields=['phone', 'updated_at'])
+                    CreditDue.objects.create(
+                        customer=request.user,
+                        sale=sale,
+                        amount=credit_needed,
+                        due_date=due_date,
+                        phone=phone,
+                        notes=f'POS sale #{sale.id}',
+                    )
+
 
                 if credit_needed > 0:
                     profile = CustomerProfile.objects.select_for_update().get(user=request.user)
@@ -359,6 +397,7 @@ def post_cashbook(*, entry_type, amount, user=None, description='', reference=''
         'currency': CURRENCY_SYMBOL,
         'profile': profile,
         'change': None,
+        'is_loose': request.session.get('purchase_info', {}).get('is_loose', False),
     })
 
 
@@ -651,6 +690,30 @@ def customer_ledger_detail(request, user_id):
                     payment_method=method if method in ('cash', 'card', 'other') else 'cash',
                     received_by=request.user,
                     notes=notes,
+                )
+
+                # Settle oldest open dues
+                remaining = amount
+                for due in CreditDue.objects.select_for_update().filter(
+                    customer=customer, is_settled=False
+                ).order_by('due_date'):
+                    if remaining <= 0:
+                        break
+                    if due.amount <= remaining:
+                        remaining -= due.amount
+                        due.is_settled = True
+                        due.save(update_fields=['is_settled'])
+                    else:
+                        due.amount = (due.amount - remaining).quantize(Decimal('0.01'))
+                        due.save(update_fields=['amount'])
+                        remaining = Decimal('0.00')
+                post_cashbook(
+                    entry_type=CashbookEntry.TYPE_CREDIT_RECOVERY,
+                    amount=amount,
+                    user=request.user,
+                    description=f'Udhaar recovery from {customer.username}',
+                    customer=customer,
+                    payment_channel=method if method in ('cash', 'online', 'bank') else 'cash',
                 )
             messages.success(
                 request,
@@ -1582,6 +1645,30 @@ def refresh_alerts(request):
 
     messages.success(request, f"Generated {created} notifications.")
     return redirect('notifications_list')
+
+
+@login_required
+def customer_suggest(request):
+    from django.http import JsonResponse
+    from django.db import models as djmodels
+    q = (request.GET.get('q') or '').strip()
+    if len(q) < 1:
+        return JsonResponse({'results': []})
+    users = User.objects.filter(
+        djmodels.Q(username__icontains=q) | djmodels.Q(first_name__icontains=q) | djmodels.Q(last_name__icontains=q)
+    )[:15]
+    results = []
+    for u in users:
+        bal = '0.00'
+        phone = ''
+        try:
+            pr = u.customer_profile
+            bal = str(pr.balance)
+            phone = pr.phone or ''
+        except Exception:
+            pass
+        results.append({'id': u.id, 'username': u.username, 'balance': bal, 'phone': phone})
+    return JsonResponse({'results': results})
 
 def custom_404(request, exception=None):
     return render(request, 'inventory/404.html', status=404)
