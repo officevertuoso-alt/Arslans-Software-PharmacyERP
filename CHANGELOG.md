@@ -276,3 +276,28 @@ If you add more strings, run on a machine with gettext:
 - UI: `/medicine-master/preload/`
 - Imports Pakistan Medicine Master List (~41k) into MedicineMaster
 - **Not stock** — Candela-style preloaded drug list for search
+
+
+## [Phase 13] — 2026-10-26 — Remaining commercial features
+
+### Customers & invoices
+- `CustomerParty` walk-in/credit customers
+- `SaleInvoice` multi-line bill header linked from POS
+- Invoice list + **same-day void** (restock + audit + cashbook adjustment)
+
+### Supplier returns
+- FEFO stock out, supplier balance down, cashbook purchase_return
+
+### Purchasing
+- Auto draft PO from low-stock products
+
+### Compliance & finance
+- Controlled / Rx sales register
+- Simple P&L (revenue − batch COGS − expenses)
+- Audit log
+
+### Migration
+- `0017_phase13_complete.py`
+
+### Still not full Candela
+- FBR live API, multi-branch godown, SMS gateway, native offline installer
