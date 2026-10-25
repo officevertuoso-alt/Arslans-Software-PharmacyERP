@@ -75,3 +75,21 @@
 
 ### Migration
 - `0010_product_batch_fefo.py`
+
+
+## [Phase 4] — 2026-10-26 — Supplier Purchases & Payables
+
+### Models
+- `Supplier.balance` — accounts payable (positive = we owe supplier)
+- `SupplierPurchase` — invoice/GRN with subtotal, tax, total, amount_paid
+- `SupplierPurchaseLine` — product, batch, qty, unit_cost, expiry → creates ProductBatch
+- `SupplierPayment` — payments to suppliers, optional invoice allocation
+
+### Workflow
+1. **New purchase** `/supplier-purchases/add/` — multi-line invoice
+2. On receive: batches created/updated (FEFO-ready), stock synced, supplier balance += unpaid
+3. **Pay supplier** `/suppliers/<id>/pay/` — reduce balance, optional invoice allocation
+4. List `/supplier-purchases/` and detail views
+
+### Migration
+- `0011_supplier_purchases.py`
