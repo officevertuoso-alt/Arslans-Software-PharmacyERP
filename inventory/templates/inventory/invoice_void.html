@@ -1,0 +1,14 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Void {{ inv.bill_number }}{% endblock %}
+{% block content %}
+<div class="container py-3" style="max-width:480px">
+  <h2>Void bill {{ inv.bill_number }}</h2>
+  <p>Total {{ currency }}{{ inv.total }} · Paid {{ currency }}{{ inv.amount_paid }}</p>
+  <form method="post" class="card card-body">
+    {% csrf_token %}
+    <label class="form-label">Reason *</label>
+    <input name="reason" class="form-control mb-3" required>
+    <button class="btn btn-danger" onclick="return confirm('Void this bill and restock?');">Confirm void</button>
+  </form>
+</div>
+{% endblock %}
