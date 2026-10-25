@@ -1,0 +1,22 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Supplier return{% endblock %}
+{% block content %}
+<div class="container py-3" style="max-width:560px">
+  <h2>Supplier return</h2>
+  <form method="post" class="card card-body">
+    {% csrf_token %}
+    <select name="supplier_id" class="form-select mb-2" required>
+      <option value="">Supplier</option>
+      {% for s in suppliers %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
+    </select>
+    <select name="product_id" class="form-select mb-2" required>
+      <option value="">Product</option>
+      {% for p in products %}<option value="{{ p.id }}">{{ p.name }} ({{ p.quantity }})</option>{% endfor %}
+    </select>
+    <input type="number" name="quantity" class="form-control mb-2" min="1" placeholder="Qty" required>
+    <input type="number" step="0.01" name="unit_cost" class="form-control mb-2" placeholder="Unit cost">
+    <input type="text" name="reason" class="form-control mb-2" placeholder="Reason">
+    <button class="btn btn-warning">Save return</button>
+  </form>
+</div>
+{% endblock %}
