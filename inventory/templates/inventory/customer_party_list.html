@@ -1,0 +1,24 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Customers{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h2>Walk-in / credit customers</h2>
+  <form method="get" class="mb-2"><input name="q" value="{{ q }}" class="form-control" placeholder="Search name/phone"></form>
+  <form method="post" class="card card-body mb-3 row g-2">
+    {% csrf_token %}
+    <div class="col-md-3"><input name="name" class="form-control" placeholder="Name *" required></div>
+    <div class="col-md-2"><input name="phone" class="form-control" placeholder="Phone"></div>
+    <div class="col-md-3"><input name="address" class="form-control" placeholder="Address"></div>
+    <div class="col-md-2"><input name="credit_limit" type="number" class="form-control" value="50000" placeholder="Credit limit"></div>
+    <div class="col-md-2"><button class="btn btn-primary w-100">Add</button></div>
+  </form>
+  <table class="table table-sm table-striped">
+    <thead><tr><th>Name</th><th>Phone</th><th>Balance</th><th>Limit</th></tr></thead>
+    <tbody>
+    {% for p in parties %}
+      <tr><td>{{ p.name }}</td><td>{{ p.phone }}</td><td>{{ currency }}{{ p.balance }}</td><td>{{ currency }}{{ p.credit_limit }}</td></tr>
+    {% empty %}<tr><td colspan="4">None yet</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
