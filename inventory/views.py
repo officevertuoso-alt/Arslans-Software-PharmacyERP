@@ -1,5 +1,5 @@
 from django.shortcuts import render, get_object_or_404, redirect
-from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation, SupplierPurchase, SupplierPurchaseLine, SupplierPayment, CashbookEntry, MedicineMaster, AppNotification, CreditDue, StockAdjustment, PosShift, CustomerParty, SaleInvoice, AuditLog, SupplierReturn, PurchaseOrder, PurchaseOrderLine, MessageLog
+from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation, SupplierPurchase, SupplierPurchaseLine, SupplierPayment, CashbookEntry, MedicineMaster, AppNotification, CreditDue, StockAdjustment, PosShift, CustomerParty, SaleInvoice, AuditLog, SupplierReturn, PurchaseOrder, PurchaseOrderLine, MessageLog, AppSettings
 from datetime import timedelta
 from django.utils import timezone
 from django.contrib import messages
@@ -2812,6 +2812,110 @@ def _maybe_send_bill_message(request, bill_number, phone, total, paid, credit):
     except Exception:
         pass
 
+
+@admin_required
+def system_tools(request):
+    """Backup, restore, reset, theme, schedule."""
+    from inventory.backup_utils import create_backup, list_backups, restore_backup, prune_backups, maybe_auto_backup
+    cfg = AppSettings.get()
+    # trigger schedule check on page load
+    try:
+        maybe_auto_backup()
+    except Exception:
+        pass
+
+    if request.method == 'POST':
+        action = request.POST.get('action')
+        if action == 'backup_now':
+            try:
+                path = create_backup('manual')
+                prune_backups(cfg.backup_keep_count or 14)
+                messages.success(request, f'Backup created: {path.name}')
+            except Exception as e:
+                messages.error(request, str(e))
+            return redirect('system_tools')
+        if action == 'save_settings':
+            cfg.theme = request.POST.get('theme') or 'pharmacy'
+            if cfg.theme not in dict(AppSettings.THEME_CHOICES):
+                cfg.theme = 'pharmacy'
+            cfg.shop_name = (request.POST.get('shop_name') or cfg.shop_name)[:120]
+            cfg.backup_enabled = request.POST.get('backup_enabled') == '1'
+            try:
+                cfg.backup_interval_hours = max(1, int(request.POST.get('backup_interval_hours') or 24))
+                cfg.backup_keep_count = max(1, int(request.POST.get('backup_keep_count') or 14))
+            except ValueError:
+                pass
+            cfg.save()
+            request.session['ui_theme'] = cfg.theme
+            messages.success(request, 'Settings saved.')
+            return redirect('system_tools')
+        if action == 'restore':
+            name = request.POST.get('backup_file') or ''
+            if not request.POST.get('confirm_restore'):
+                messages.error(request, 'Confirm restore checkbox required.')
+                return redirect('system_tools')
+            try:
+                restore_backup(name)
+                messages.success(request, f'Restored {name}. Restart server if connection errors appear.')
+            except Exception as e:
+                messages.error(request, str(e))
+            return redirect('system_tools')
+        if action == 'reset_demo':
+            if not request.user.is_superuser:
+                messages.error(request, 'Only superuser can factory-reset transactional data.')
+                return redirect('system_tools')
+            if request.POST.get('confirm_reset') != 'RESET':
+                messages.error(request, 'Type RESET to confirm.')
+                return redirect('system_tools')
+            with transaction.atomic():
+                # clear transactional tables, keep products/master optional
+                keep_catalog = request.POST.get('keep_catalog') == '1'
+                Purchase.objects.all().delete()
+                if hasattr(SaleInvoice, 'objects'):
+                    SaleInvoice.objects.all().delete()
+                CreditDue.objects.all().delete()
+                CashbookEntry.objects.all().delete()
+                StockAdjustment.objects.all().delete()
+                SupplierReturn.objects.all().delete()
+                MessageLog.objects.all().delete()
+                AuditLog.objects.all().delete()
+                PosShift.objects.all().delete()
+                PurchaseOrder.objects.all().delete()
+                if not keep_catalog:
+                    ProductBatch.objects.all().delete()
+                    Product.objects.all().delete()
+                else:
+                    Product.objects.update(quantity=0)
+                    ProductBatch.objects.all().delete()
+                try:
+                    create_backup('pre_reset')
+                except Exception:
+                    pass
+                _audit(request.user, 'factory_reset', f'keep_catalog={keep_catalog}')
+            messages.warning(request, 'Transactional data reset complete.')
+            return redirect('system_tools')
+        if action == 'set_theme':
+            theme = request.POST.get('theme') or 'pharmacy'
+            cfg.theme = theme
+            cfg.save(update_fields=['theme'])
+            request.session['ui_theme'] = theme
+            return redirect(request.POST.get('next') or 'system_tools')
+
+    backups = []
+    for f in list_backups()[:30]:
+        backups.append({
+            'name': f.name,
+            'size_kb': round(f.stat().st_size / 1024, 1),
+            'mtime': f.stat().st_mtime,
+        })
+    return render(request, 'inventory/system_tools.html', {
+        'cfg': cfg,
+        'backups': backups,
+        'themes': AppSettings.THEME_CHOICES,
+    })
+
+
+# ensure datetime import used in system_tools - already have timezone
 def custom_404(request, exception=None):
     return render(request, 'inventory/404.html', status=404)
 
