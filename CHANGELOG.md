@@ -177,3 +177,23 @@ If you add more strings, run on a machine with gettext:
 
 ### Migration
 - `0013_cashbook_master_notifications.py`
+
+
+## [Phase 8B] — 2026-10-26 — POS credit/partial, due dates, suggestions
+
+### Checkout
+- Payment methods: Cash, Online, Credit, Partial
+- Paid < total → phone + due date required; `CreditDue` saved
+- Cash + paid 0 → confirm switch to Credit
+- Previous bakaya shown; link to credit profile
+- Customer name autocomplete (`/api/customer-suggest/`)
+
+### Credit recovery
+- Receiving payment settles oldest `CreditDue` rows
+- Cashbook `credit_recovery` entry
+
+### Loose sale
+- Optional "Loose / unit sale" flag on shop forms (session)
+
+### Purchase
+- Tip link to Medicine Master for catalog-driven SKU setup
