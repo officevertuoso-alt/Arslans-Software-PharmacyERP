@@ -22,7 +22,7 @@
         </h3>
         <a href="{% url 'shift_close' %}" class="btn btn-sm btn-outline-danger">Close shift</a>
     <div class="pos-help">
-      <kbd>F2</kbd> search &nbsp; <kbd>F4</kbd> alternates &nbsp; <kbd>P</kbd> pack mode &nbsp;
+      <kbd>F1</kbd> product list &nbsp; <kbd>F2</kbd> search &nbsp; <kbd>F4</kbd> alternates &nbsp; <kbd>P</kbd> pack mode &nbsp;
       <kbd>Enter</kbd> add &nbsp;
       <kbd>↑↓</kbd> cart &nbsp;
       <kbd>+</kbd>/<kbd>-</kbd> qty &nbsp;
@@ -145,6 +145,41 @@
 
       <div class="mt-2 small text-muted">
         Scanner: leave cursor in search box; scanner sends code + Enter automatically.
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- Candela-style F1 Product Help -->
+<div class="modal fade" id="product-help-modal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header py-2 bg-dark text-white">
+        <h5 class="modal-title">Product Help (F1) — Stock + Master catalog</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-2">
+        <div class="input-group mb-2">
+          <input type="text" id="help-q" class="form-control form-control-lg" placeholder="Name / generic / brand / company…">
+          <select id="help-source" class="form-select" style="max-width:140px">
+            <option value="all">All</option>
+            <option value="stock">In stock only</option>
+            <option value="master">Master catalog</option>
+          </select>
+        </div>
+        <div class="table-responsive" style="max-height:55vh">
+          <table class="table table-sm table-hover table-striped mb-0">
+            <thead class="table-secondary sticky-top">
+              <tr>
+                <th>Type</th><th>Product</th><th>Generic / Salt</th><th>Brand</th>
+                <th class="text-end">Price</th><th>Stock</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="help-body"></tbody>
+          </table>
+        </div>
+        <div class="small text-muted mt-1">↑↓ select · Enter add to cart · Master rows create SKU (qty 0) if needed</div>
       </div>
     </div>
   </div>
@@ -311,6 +346,7 @@
 
   // Cart keyboard when not in input
   document.addEventListener('keydown', function(e){
+    if (e.key === 'F1') { e.preventDefault(); openProductHelp(); return; }
     if (e.key === 'F2') { e.preventDefault(); focusScan(); return; }
     if (e.key === 'F12') { e.preventDefault(); if (!btnPay.disabled) document.getElementById('pay-form').requestSubmit(); return; }
     if (e.key === 'F9') { e.preventDefault(); document.getElementById('btn-hold').click(); return; }
@@ -421,6 +457,77 @@
   }
   payMethod.addEventListener('change', syncPay);
   payAmount.addEventListener('input', syncPay);
+
+
+  let helpIdx = -1;
+  let helpRows = [];
+  function openProductHelp(){
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('product-help-modal'));
+    modal.show();
+    setTimeout(() => { document.getElementById('help-q').focus(); loadHelp(); }, 300);
+  }
+  function loadHelp(){
+    const q = document.getElementById('help-q').value.trim();
+    const source = document.getElementById('help-source').value;
+    fetch('{% url "pos_product_help" %}?q=' + encodeURIComponent(q) + '&source=' + source)
+      .then(r => r.json()).then(d => {
+        helpRows = d.results || [];
+        helpIdx = helpRows.length ? 0 : -1;
+        renderHelp();
+      });
+  }
+  function renderHelp(){
+    const body = document.getElementById('help-body');
+    body.innerHTML = helpRows.map((p,i) => {
+      const kind = p.kind === 'stock' ? '<span class="badge bg-success">Stock</span>' : '<span class="badge bg-secondary">Master</span>';
+      const sel = i === helpIdx ? 'table-primary' : '';
+      return `<tr class="${sel}" data-i="${i}">
+        <td>${kind}</td>
+        <td><strong>${p.name}</strong></td>
+        <td class="small">${p.generic||''}</td>
+        <td class="small">${p.brand||''}</td>
+        <td class="text-end">Rs.${p.price}</td>
+        <td>${p.stock_display||''}</td>
+        <td><button type="button" class="btn btn-sm btn-primary btn-help-add" data-i="${i}">Add</button></td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="7" class="text-center text-muted">Type to search 40k+ catalog / stock</td></tr>';
+  }
+  function addHelpRow(i){
+    const p = helpRows[i];
+    if (!p) return;
+    if (p.kind === 'stock') {
+      if (p.stock <= 0) { alert('Out of stock — receive purchase first'); return; }
+      addProduct(p.id, 1);
+      bootstrap.Modal.getInstance(document.getElementById('product-help-modal')).hide();
+      focusScan();
+      return;
+    }
+    // master → create product then cannot sell qty 0
+    const fd = new FormData();
+    fd.append('master_id', p.id);
+    fd.append('csrfmiddlewaretoken', '{{ csrf_token }}');
+    fetch('{% url "master_to_product" %}', { method:'POST', body: fd, headers:{'X-Requested-With':'XMLHttpRequest'} })
+      .then(r => r.json()).then(d => {
+        if (d.error) { alert(d.error); return; }
+        alert(d.message + '\\nProduct id ' + d.product_id + ' — add stock via Purchase / Receive batch, then sell.');
+      });
+  }
+  document.getElementById('help-q').addEventListener('input', function(){
+    clearTimeout(window._helpT);
+    window._helpT = setTimeout(loadHelp, 150);
+  });
+  document.getElementById('help-source').addEventListener('change', loadHelp);
+  document.getElementById('help-body').addEventListener('click', function(e){
+    const btn = e.target.closest('.btn-help-add');
+    if (btn) addHelpRow(+btn.dataset.i);
+    const tr = e.target.closest('tr[data-i]');
+    if (tr) { helpIdx = +tr.dataset.i; renderHelp(); }
+  });
+  document.getElementById('help-q').addEventListener('keydown', function(e){
+    if (e.key === 'ArrowDown') { e.preventDefault(); helpIdx = Math.min(helpIdx+1, helpRows.length-1); renderHelp(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); helpIdx = Math.max(helpIdx-1, 0); renderHelp(); }
+    if (e.key === 'Enter') { e.preventDefault(); if (helpIdx>=0) addHelpRow(helpIdx); }
+  });
 
   focusScan();
 })();
