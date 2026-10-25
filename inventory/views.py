@@ -5,11 +5,11 @@ from django.utils import timezone
 from django.contrib import messages
 import pandas as pd
 from django.contrib.auth.models import User
-from django.http import HttpResponse
+from django.http import HttpResponse, FileResponse, Http404
 import barcode
 from barcode.writer import ImageWriter
 
-from datetime import date
+from datetime import date, datetime, timedelta
 
 from .forms import ProductForm, SupplierForm, ReturnForm, SignUpForm
 from django.contrib.auth import authenticate, login, logout
@@ -974,6 +974,226 @@ def supplier_pay(request, supplier_id):
         'supplier': supplier,
         'open_purchases': open_purchases,
         'payments': payments,
+        'currency': CURRENCY_SYMBOL,
+    })
+
+
+@admin_required
+def reports_dashboard(request):
+    """
+    Commercial snapshot: today/week sales, estimated gross profit,
+    stock valuation, customer receivables, supplier payables.
+    """
+    today = timezone.now().date()
+    week_ago = today - timedelta(days=7)
+
+    sales_qs = Purchase.objects.all()
+    sales_today = sales_qs.filter(purchase_date__date=today)
+    sales_week = sales_qs.filter(purchase_date__date__gte=week_ago)
+
+    def sum_field(qs, field):
+        total = Decimal('0.00')
+        for row in qs.values_list(field, flat=True):
+            if row is not None:
+                total += Decimal(row)
+        return total.quantize(Decimal('0.01'))
+
+    revenue_today = sum_field(sales_today, 'total_price')
+    revenue_week = sum_field(sales_week, 'total_price')
+    revenue_all = sum_field(sales_qs, 'total_price')
+    collected_today = sum_field(sales_today, 'amount_paid')
+    credit_today = sum_field(sales_today, 'amount_on_credit')
+
+    # Estimated COGS from sale batch allocations when available
+    cogs = Decimal('0.00')
+    for alloc in SaleBatchAllocation.objects.select_related('batch').filter(
+        sale__purchase_date__date__gte=week_ago
+    ):
+        cogs += (Decimal(alloc.quantity) * Decimal(alloc.batch.purchase_cost or 0))
+    cogs = cogs.quantize(Decimal('0.01'))
+    gross_profit_week = (revenue_week - cogs).quantize(Decimal('0.01'))
+
+    # Stock valuation at selling price and at cost
+    stock_sell = Decimal('0.00')
+    stock_cost = Decimal('0.00')
+    for b in ProductBatch.objects.filter(is_active=True, quantity__gt=0).select_related('product'):
+        stock_cost += Decimal(b.quantity) * Decimal(b.purchase_cost or 0)
+        stock_sell += Decimal(b.quantity) * Decimal(b.product.price or 0)
+    # products without batches
+    for prod in Product.objects.all():
+        if not prod.batches.filter(is_active=True, quantity__gt=0).exists():
+            stock_sell += Decimal(prod.quantity) * Decimal(prod.price or 0)
+
+    stock_cost = stock_cost.quantize(Decimal('0.01'))
+    stock_sell = stock_sell.quantize(Decimal('0.01'))
+
+    receivables = sum(
+        (Decimal(p.balance) for p in CustomerProfile.objects.filter(balance__gt=0)),
+        Decimal('0.00')
+    ).quantize(Decimal('0.01'))
+    payables = sum(
+        (Decimal(s.balance) for s in Supplier.objects.filter(balance__gt=0)),
+        Decimal('0.00')
+    ).quantize(Decimal('0.01'))
+
+    low_stock = sum(1 for p in Product.objects.all() if p.is_low_stock)
+    expired = Product.objects.filter(expiry_date__lt=today).count()
+    expiring = Product.objects.filter(
+        expiry_date__gte=today, expiry_date__lte=today + timedelta(days=7)
+    ).count()
+
+    return render(request, 'inventory/reports_dashboard.html', {
+        'currency': CURRENCY_SYMBOL,
+        'today': today,
+        'revenue_today': revenue_today,
+        'collected_today': collected_today,
+        'credit_today': credit_today,
+        'revenue_week': revenue_week,
+        'revenue_all': revenue_all,
+        'cogs_week': cogs,
+        'gross_profit_week': gross_profit_week,
+        'stock_cost': stock_cost,
+        'stock_sell': stock_sell,
+        'receivables': receivables,
+        'payables': payables,
+        'low_stock': low_stock,
+        'expired': expired,
+        'expiring': expiring,
+        'sales_today_count': sales_today.count(),
+    })
+
+
+@admin_required
+def backup_database(request):
+    """
+    Download a consistent SQLite backup using the backup API when possible.
+    """
+    db_path = FilePath(settings.DATABASES['default']['NAME'])
+    if not db_path.exists():
+        messages.error(request, "Database file not found.")
+        return redirect('reports_dashboard')
+
+    backup_dir = FilePath(settings.BASE_DIR) / 'backups'
+    backup_dir.mkdir(exist_ok=True)
+    stamp = timezone.now().strftime('%Y%m%d_%H%M%S')
+    backup_path = backup_dir / f'pharmacy_backup_{stamp}.sqlite3'
+
+    try:
+        import sqlite3
+        src = sqlite3.connect(str(db_path))
+        dst = sqlite3.connect(str(backup_path))
+        with dst:
+            src.backup(dst)
+        dst.close()
+        src.close()
+    except Exception:
+        # Fallback: file copy (app should be quiet)
+        shutil.copy2(db_path, backup_path)
+
+    # Also keep a copy as latest
+    latest = backup_dir / 'latest.sqlite3'
+    shutil.copy2(backup_path, latest)
+
+    response = FileResponse(
+        open(backup_path, 'rb'),
+        as_attachment=True,
+        filename=backup_path.name,
+    )
+    return response
+
+
+@admin_required
+def restore_database(request):
+    """
+    Upload a .sqlite3 backup. Creates a safety backup of current DB first.
+    User must restart the server after restore for full consistency.
+    """
+    if request.method == 'POST' and request.FILES.get('backup_file'):
+        upload = request.FILES['backup_file']
+        if not upload.name.endswith(('.sqlite3', '.db', '.sqlite')):
+            messages.error(request, "Please upload a .sqlite3 database file.")
+            return redirect('restore_database')
+
+        db_path = FilePath(settings.DATABASES['default']['NAME'])
+        backup_dir = FilePath(settings.BASE_DIR) / 'backups'
+        backup_dir.mkdir(exist_ok=True)
+        safety = backup_dir / f'safety_before_restore_{timezone.now().strftime("%Y%m%d_%H%M%S")}.sqlite3'
+
+        try:
+            # Safety backup of current
+            if db_path.exists():
+                shutil.copy2(db_path, safety)
+
+            # Write upload to temp then replace
+            temp_path = backup_dir / 'upload_restore_temp.sqlite3'
+            with open(temp_path, 'wb') as out:
+                for chunk in upload.chunks():
+                    out.write(chunk)
+
+            # Basic integrity check
+            import sqlite3
+            conn = sqlite3.connect(str(temp_path))
+            try:
+                conn.execute('PRAGMA integrity_check').fetchone()
+            finally:
+                conn.close()
+
+            shutil.copy2(temp_path, db_path)
+            messages.success(
+                request,
+                f"Database restored from {upload.name}. "
+                f"Safety copy saved as {safety.name}. "
+                f"Please restart the application server."
+            )
+            return redirect('reports_dashboard')
+        except Exception as e:
+            messages.error(request, f"Restore failed: {e}")
+            return redirect('restore_database')
+
+    backup_dir = FilePath(settings.BASE_DIR) / 'backups'
+    existing = []
+    if backup_dir.exists():
+        existing = sorted(backup_dir.glob('*.sqlite3'), key=lambda p: p.stat().st_mtime, reverse=True)[:20]
+
+    return render(request, 'inventory/restore_database.html', {
+        'existing_backups': existing,
+    })
+
+
+@admin_required
+def daily_closing(request):
+    """Simple daily closing summary for the selected date (default today)."""
+    day_str = request.GET.get('date') or timezone.now().date().isoformat()
+    try:
+        day = date.fromisoformat(day_str)
+    except ValueError:
+        day = timezone.now().date()
+
+    sales = Purchase.objects.filter(purchase_date__date=day)
+    payments = CustomerPayment.objects.filter(created_at__date=day)
+    supplier_pays = SupplierPayment.objects.filter(paid_at__date=day)
+    returns = Return.objects.filter(processed_at__date=day, status='Approved')
+
+    sales_total = sum((s.total_price for s in sales), Decimal('0.00'))
+    cash_in = sum((s.amount_paid for s in sales), Decimal('0.00'))
+    credit_new = sum((s.amount_on_credit for s in sales), Decimal('0.00'))
+    udhaar_collected = sum((p.amount for p in payments), Decimal('0.00'))
+    supplier_paid = sum((p.amount for p in supplier_pays), Decimal('0.00'))
+    refunds = sum((r.refund_amount for r in returns if r.refund_method == 'cash'), Decimal('0.00'))
+
+    net_cash = (cash_in + udhaar_collected - supplier_paid - refunds).quantize(Decimal('0.01'))
+
+    return render(request, 'inventory/daily_closing.html', {
+        'day': day,
+        'sales': sales,
+        'sales_total': sales_total.quantize(Decimal('0.01')),
+        'cash_in': cash_in.quantize(Decimal('0.01')),
+        'credit_new': credit_new.quantize(Decimal('0.01')),
+        'udhaar_collected': udhaar_collected.quantize(Decimal('0.01')),
+        'supplier_paid': supplier_paid.quantize(Decimal('0.01')),
+        'refunds': refunds.quantize(Decimal('0.01')),
+        'net_cash': net_cash,
+        'returns': returns,
         'currency': CURRENCY_SYMBOL,
     })
 
