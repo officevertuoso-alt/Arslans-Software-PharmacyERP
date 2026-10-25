@@ -54,4 +54,10 @@ urlpatterns = [
     path('supplier-purchases/add/', views.supplier_purchase_create, name='supplier_purchase_create'),
     path('supplier-purchases/<int:pk>/', views.supplier_purchase_detail, name='supplier_purchase_detail'),
     path('suppliers/<int:supplier_id>/pay/', views.supplier_pay, name='supplier_pay'),
+
+    # Reports & backup
+    path('reports/', views.reports_dashboard, name='reports_dashboard'),
+    path('reports/daily-closing/', views.daily_closing, name='daily_closing'),
+    path('backup/', views.backup_database, name='backup_database'),
+    path('restore/', views.restore_database, name='restore_database'),
 ]
