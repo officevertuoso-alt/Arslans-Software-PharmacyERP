@@ -1,0 +1,32 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Restore Database{% endblock %}
+{% block content %}
+<div class="container py-3" style="max-width:640px">
+  <h2>Restore database</h2>
+  <div class="alert alert-danger">
+    Restoring replaces the current database. A safety backup is created first.
+    After restore, <strong>restart the server</strong>.
+  </div>
+  <form method="post" enctype="multipart/form-data" class="card card-body mb-4">
+    {% csrf_token %}
+    <div class="mb-3">
+      <label class="form-label">Backup file (.sqlite3)</label>
+      <input type="file" name="backup_file" accept=".sqlite3,.db,.sqlite" class="form-control" required>
+    </div>
+    <button type="submit" class="btn btn-warning" onclick="return confirm('Replace current database with this backup?');">Restore</button>
+    <a href="{% url 'backup_database' %}" class="btn btn-success">Download current backup first</a>
+  </form>
+
+  <h5>Recent local backups (server)</h5>
+  <ul class="list-group">
+  {% for b in existing_backups %}
+    <li class="list-group-item d-flex justify-content-between">
+      <span>{{ b.name }}</span>
+      <small class="text-muted">{{ b.stat.st_size|filesizeformat }}</small>
+    </li>
+  {% empty %}
+    <li class="list-group-item">No backups in /backups yet. Use Download backup.</li>
+  {% endfor %}
+  </ul>
+</div>
+{% endblock %}
