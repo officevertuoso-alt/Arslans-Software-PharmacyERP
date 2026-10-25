@@ -838,3 +838,36 @@ class PurchaseOrderLine(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
     quantity = models.PositiveIntegerField(default=1)
     notes = models.CharField(max_length=120, blank=True)
+
+
+
+class MessageLog(models.Model):
+    CHANNEL_SMS = 'sms'
+    CHANNEL_WHATSAPP = 'whatsapp'
+    CHANNEL_CHOICES = [(CHANNEL_SMS, 'SMS'), (CHANNEL_WHATSAPP, 'WhatsApp')]
+    STATUS_PENDING = 'pending'
+    STATUS_SENT = 'sent'
+    STATUS_FAILED = 'failed'
+    STATUS_SKIPPED = 'skipped'
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_SENT, 'Sent'),
+        (STATUS_FAILED, 'Failed'),
+        (STATUS_SKIPPED, 'Skipped'),
+    ]
+    channel = models.CharField(max_length=12, choices=CHANNEL_CHOICES)
+    to_phone = models.CharField(max_length=20)
+    body = models.TextField()
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    provider = models.CharField(max_length=32, blank=True)
+    provider_response = models.TextField(blank=True)
+    purpose = models.CharField(max_length=64, blank=True)  # bill, due_reminder, test
+    related_bill = models.CharField(max_length=32, blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.channel} {self.to_phone} {self.status}'
