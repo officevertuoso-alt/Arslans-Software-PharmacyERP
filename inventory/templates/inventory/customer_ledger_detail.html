@@ -1,0 +1,85 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Ledger — {{ customer.username }}{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h2>Ledger: {{ customer.username }}</h2>
+  <div class="alert alert-secondary">
+    <strong>Balance:</strong> {{ currency }}{{ profile.balance|floatformat:2 }}
+    &nbsp;|&nbsp; <strong>Limit:</strong> {{ currency }}{{ profile.credit_limit|floatformat:2 }}
+    &nbsp;|&nbsp; <strong>Available:</strong> {{ currency }}{{ profile.available_credit|floatformat:2 }}
+  </div>
+
+  {% if profile.balance > 0 %}
+  <div class="card mb-4">
+    <div class="card-body">
+      <h5 class="card-title">Receive payment against udhaar</h5>
+      <form method="post" class="row g-2">
+        {% csrf_token %}
+        <div class="col-md-3">
+          <label class="form-label">Amount (Rs.)</label>
+          <input type="number" step="0.01" min="0.01" max="{{ profile.balance }}" name="amount" class="form-control" required>
+        </div>
+        <div class="col-md-3">
+          <label class="form-label">Method</label>
+          <select name="payment_method" class="form-select">
+            <option value="cash">Cash</option>
+            <option value="card">Card / Bank</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label">Notes</label>
+          <input type="text" name="notes" class="form-control" maxlength="255">
+        </div>
+        <div class="col-md-2 d-flex align-items-end">
+          <button type="submit" class="btn btn-success w-100">Receive</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+
+  <h4>Sales</h4>
+  <div class="table-responsive mb-4">
+  <table class="table table-sm table-striped">
+    <thead><tr><th>Date</th><th>Product</th><th>Qty</th><th>Total</th><th>Paid</th><th>Credit</th><th>Method</th></tr></thead>
+    <tbody>
+    {% for s in sales %}
+      <tr>
+        <td>{{ s.purchase_date|date:"Y-m-d H:i" }}</td>
+        <td>{{ s.product.name }}</td>
+        <td>{{ s.quantity }}</td>
+        <td>{{ currency }}{{ s.total_price|floatformat:2 }}</td>
+        <td>{{ currency }}{{ s.amount_paid|floatformat:2 }}</td>
+        <td>{{ currency }}{{ s.amount_on_credit|floatformat:2 }}</td>
+        <td>{{ s.get_payment_method_display }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="7">No sales.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  <h4>Payments</h4>
+  <div class="table-responsive">
+  <table class="table table-sm table-striped">
+    <thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Received by</th><th>Notes</th></tr></thead>
+    <tbody>
+    {% for p in payments %}
+      <tr>
+        <td>{{ p.created_at|date:"Y-m-d H:i" }}</td>
+        <td>{{ currency }}{{ p.amount|floatformat:2 }}</td>
+        <td>{{ p.get_payment_method_display }}</td>
+        <td>{{ p.received_by.username|default:"—" }}</td>
+        <td>{{ p.notes }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="5">No payments.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <a href="{% url 'customer_ledger_list' %}" class="btn btn-secondary mt-3">All customers</a>
+</div>
+{% endblock %}
