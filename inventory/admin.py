@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation
+from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation, SupplierPurchase, SupplierPurchaseLine, SupplierPayment
 
 
 @admin.register(Product)
@@ -17,7 +17,7 @@ class PurchaseAdmin(admin.ModelAdmin):
 
 @admin.register(Supplier)
 class SupplierAdmin(admin.ModelAdmin):
-    list_display = ('name', 'contact_person', 'phone_number', 'email')
+    list_display = ('name', 'contact_person', 'phone_number', 'balance', 'is_active')
     search_fields = ('name', 'contact_person')
 
 
@@ -53,3 +53,23 @@ class ProductBatchAdmin(admin.ModelAdmin):
 class SaleBatchAllocationAdmin(admin.ModelAdmin):
     list_display = ('sale', 'batch', 'quantity')
     raw_id_fields = ('sale', 'batch')
+
+
+class SupplierPurchaseLineInline(admin.TabularInline):
+    model = SupplierPurchaseLine
+    extra = 0
+    raw_id_fields = ('product', 'batch')
+
+
+@admin.register(SupplierPurchase)
+class SupplierPurchaseAdmin(admin.ModelAdmin):
+    list_display = ('invoice_number', 'supplier', 'invoice_date', 'total', 'amount_paid', 'status')
+    list_filter = ('status', 'invoice_date')
+    search_fields = ('invoice_number', 'supplier__name')
+    inlines = [SupplierPurchaseLineInline]
+
+
+@admin.register(SupplierPayment)
+class SupplierPaymentAdmin(admin.ModelAdmin):
+    list_display = ('supplier', 'amount', 'payment_method', 'paid_at', 'paid_by')
+    list_filter = ('payment_method', 'paid_at')
