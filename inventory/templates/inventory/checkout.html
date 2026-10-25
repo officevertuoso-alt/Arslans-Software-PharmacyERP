@@ -1,64 +1,131 @@
 {% load i18n %}
 {% extends 'inventory/base.html' %}
-
-{% block title %}Checkout - PharmaStock{% endblock %}
-
+{% block title %}{% trans "Checkout" %} - Arslan's Software{% endblock %}
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-md-6">
-        
-        {% if messages %}
-            {% for message in messages %}
-                <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                    {{ message }}
-                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                </div>
-            {% endfor %}
-        {% endif %}
+<div class="container py-3" style="max-width:720px">
+  <h2>{% trans "Checkout" %}</h2>
 
-        <div class="card shadow-sm">
-            <div class="card-body">
-                <h2 class="card-title text-center">{% trans "Checkout" %}</h2>
-                <p class="text-center text-muted">Review your order and complete your payment</p>
+  <div class="card card-body mb-3">
+    <p class="mb-1"><strong>{% trans "Product" %}:</strong> {{ product.name }}</p>
+    <p class="mb-1"><strong>{% trans "Quantity" %}:</strong> {{ quantity }}{% if is_loose %} <span class="badge bg-info">Loose</span>{% endif %}</p>
+    <p class="mb-0"><strong>{% trans "Total Cost" %}:</strong> {{ currency }}{{ total_cost|floatformat:2 }}</p>
+  </div>
 
-                <div class="mb-3">
-                    <strong>Product:</strong> {{ product.name }}
-                </div>
-                <div class="mb-3">
-                    <strong>Quantity:</strong> {{ quantity }}
-                </div>
-                <div class="mb-3">
-                    <strong>Price per item:</strong> ₱{{ product.price|floatformat:2 }}
-                </div>
-                <div class="mb-3">
-                    <strong>Total Cost:</strong> ₱{{ total_cost|floatformat:2 }}
-                </div>
+  {% if profile %}
+  <div class="alert alert-info py-2">
+    <strong>Previous bakaya (udhaar):</strong> {{ currency }}{{ profile.balance|floatformat:2 }}
+    &nbsp;|&nbsp; Available credit: {{ currency }}{{ profile.available_credit|floatformat:2 }}
+    {% if profile.balance > 0 %}
+      <a href="{% url 'customer_ledger_detail' user.id %}" class="alert-link">Open credit profile</a>
+    {% endif %}
+  </div>
+  {% endif %}
 
-                <form method="post">
-                    {% csrf_token %}
-                    <div class="mb-3">
-                        <label for="payment_amount" class="form-label">{% trans "Payment Amount" %}</label>
-                        <input type="number" id="payment_amount" name="payment_amount" 
-                               class="form-control" step="0.01" 
-                               min="{{ total_cost|floatformat:2 }}" required>
-                    </div>
-                    <div class="d-grid gap-2">
-                        <button type="submit" class="btn btn-primary">{% trans "Pay" %}</button>
-                        <a href="{% url 'customer_product_list' %}" class="btn btn-secondary">{% trans "Back to Shop" %}</a>
-                    </div>
-                </form>
+  <form method="post" id="checkout-form" class="card card-body shadow-sm">
+    {% csrf_token %}
 
-                {% if change is not None %}
-                    <div class="alert alert-info mt-3">
-                        <strong>Change:</strong> ₱{{ change|floatformat:2 }}
-                    </div>
-                {% endif %}
-
-                <div class="mt-3 text-muted small">
-                    <strong>Note:</strong> If you are not satisfied with your purchase, you can request a return from your profile page.
-                </div>
-            </div>
-        </div>
+    <div class="mb-3">
+      <label class="form-label">Payment method</label>
+      <select name="payment_method_ui" id="payment_method_ui" class="form-select">
+        <option value="cash">Cash</option>
+        <option value="online">Online</option>
+        <option value="credit">Credit (Udhaar)</option>
+        <option value="partial">Partial</option>
+      </select>
     </div>
+
+    <div class="mb-3">
+      <label class="form-label" for="payment_amount">{% trans "Payment Amount" %} (Rs.)</label>
+      <input type="number" step="0.01" min="0" name="payment_amount" id="payment_amount"
+             class="form-control" value="{{ total_cost|floatformat:2 }}" required>
+      <div class="form-text">Full amount = cash/online. Less = partial + credit. 0 = full credit.</div>
+    </div>
+
+    <div id="credit-fields" class="border rounded p-3 mb-3 bg-light" style="display:none">
+      <h6 class="text-danger">Remaining on credit — required</h6>
+      <div class="mb-2">
+        <label class="form-label">Customer phone *</label>
+        <input type="text" name="customer_phone" id="customer_phone" class="form-control" maxlength="20" placeholder="03xx-xxxxxxx">
+      </div>
+      <div class="mb-2">
+        <label class="form-label">Due date *</label>
+        <input type="date" name="due_date" id="due_date" class="form-control">
+      </div>
+      <div class="mb-0">
+        <label class="form-label">Customer name (search saved)</label>
+        <input type="text" name="customer_name_hint" id="customer_name_hint" class="form-control" list="customer-suggestions" autocomplete="off" placeholder="Type name…">
+        <datalist id="customer-suggestions"></datalist>
+      </div>
+    </div>
+
+    <button type="submit" class="btn btn-success" id="pay-btn">{% trans "Pay" %}</button>
+    <a href="{% url 'customer_product_list' %}" class="btn btn-secondary">{% trans "Back to Shop" %}</a>
+  </form>
 </div>
+
+<script>
+(function(){
+  const total = parseFloat("{{ total_cost }}") || 0;
+  const method = document.getElementById('payment_method_ui');
+  const amount = document.getElementById('payment_amount');
+  const creditBox = document.getElementById('credit-fields');
+  const phone = document.getElementById('customer_phone');
+  const due = document.getElementById('due_date');
+
+  function sync(){
+    const paid = parseFloat(amount.value) || 0;
+    let m = method.value;
+    if (m === 'cash' && paid === 0) {
+      if (confirm('Paid amount is 0. Switch to Credit (udhaar) transaction?')) {
+        method.value = 'credit';
+        m = 'credit';
+      } else {
+        amount.value = total.toFixed(2);
+        return;
+      }
+    }
+    if (m === 'credit') {
+      amount.value = '0';
+      creditBox.style.display = 'block';
+      phone.required = true; due.required = true;
+      return;
+    }
+    if (paid < total - 0.001) {
+      method.value = 'partial';
+      creditBox.style.display = 'block';
+      phone.required = true; due.required = true;
+    } else {
+      creditBox.style.display = 'none';
+      phone.required = false; due.required = false;
+    }
+  }
+  method.addEventListener('change', function(){
+    if (method.value === 'credit') { amount.value = '0'; }
+    if (method.value === 'cash' || method.value === 'online') { amount.value = total.toFixed(2); }
+    sync();
+  });
+  amount.addEventListener('input', sync);
+  sync();
+
+  // customer name suggestions
+  const hint = document.getElementById('customer_name_hint');
+  const list = document.getElementById('customer-suggestions');
+  let t = null;
+  hint && hint.addEventListener('input', function(){
+    clearTimeout(t);
+    t = setTimeout(() => {
+      fetch('/api/customer-suggest/?q=' + encodeURIComponent(hint.value))
+        .then(r => r.json()).then(d => {
+          list.innerHTML = '';
+          (d.results||[]).forEach(c => {
+            const o = document.createElement('option');
+            o.value = c.username + (c.phone ? ' — ' + c.phone : '');
+            o.label = 'Bakaya Rs.' + c.balance;
+            list.appendChild(o);
+          });
+        }).catch(()=>{});
+    }, 250);
+  });
+})();
+</script>
 {% endblock %}
