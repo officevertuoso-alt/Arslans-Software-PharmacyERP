@@ -1,50 +1,54 @@
 {% extends 'inventory/base.html' %}
-
-{% block title %}Manage Returns - PharmaStock{% endblock %}
-
-{% block page_title %}Manage Returns{% endblock %}
-
+{% block title %}Manage Returns - Arslan's Software{% endblock %}
 {% block content %}
-<table border="1" style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-    <tr>
-        <th>Product</th>
-        <th>Customer</th>
-        <th>Quantity</th>
-        <th>Reason</th>
-        <th>Status</th>
-        <th>Date Requested</th>
-        <th>Actions</th>
-        <th>Product Details</th>
-    </tr>
-    {% for return in returns %}
-    <tr>
-        <td>{{ return.product.name }}</td>
-        <td>{{ return.customer.username }}</td>
-        <td>{{ return.quantity }}</td>
-        <td>{{ return.reason }}</td>
-        <td>{{ return.status }}</td>
-        <td>{{ return.date_requested|date:"Y-m-d H:i" }}</td>
+<div class="container py-3">
+  <h2>Manage returns</h2>
+  <div class="table-responsive">
+  <table class="table table-sm table-striped align-middle">
+    <thead>
+      <tr>
+        <th>Date</th><th>Customer</th><th>Product</th><th>Qty</th><th>Reason</th>
+        <th>Status</th><th>Refund</th><th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in returns %}
+      <tr class="{% if r.status == 'Pending' %}table-warning{% elif r.status == 'Approved' %}table-success{% endif %}">
+        <td>{{ r.date_requested|date:"Y-m-d H:i" }}</td>
+        <td>{{ r.customer.username }}</td>
+        <td>{{ r.product.name }}</td>
+        <td>{{ r.quantity }}</td>
+        <td>{{ r.reason|truncatechars:40 }}</td>
+        <td>{{ r.status }}</td>
         <td>
-            {% if return.status == "Pending" %}
-                <a href="{% url 'process_return' return.pk 'Approved' %}" class="btn btn-success">Approve</a>
-                <a href="{% url 'process_return' return.pk 'Rejected' %}" class="btn btn-danger">Reject</a>
-            {% else %}
-                {{ return.status }}
-            {% endif %}
+          {% if r.status == 'Approved' %}
+            Rs.{{ r.refund_amount|floatformat:2 }} ({{ r.get_refund_method_display }})
+          {% else %}—{% endif %}
         </td>
         <td>
-            <a href="{% url 'product_edit' return.product.pk %}" class="btn btn-secondary">View Product</a>
+          {% if r.status == 'Pending' %}
+          <form method="post" action="{% url 'process_return' r.id 'Approved' %}" class="d-inline-flex flex-wrap gap-1 align-items-center">
+            {% csrf_token %}
+            <input type="number" step="0.01" min="0" name="refund_amount" value="{{ r.suggested_refund }}" class="form-control form-control-sm" style="width:100px" title="Refund amount">
+            <select name="refund_method" class="form-select form-select-sm" style="width:140px">
+              <option value="cash">Cash refund</option>
+              <option value="credit">Credit (udhaar)</option>
+              <option value="none">No refund</option>
+            </select>
+            <label class="small mb-0"><input type="checkbox" name="restock" value="1" checked> Restock</label>
+            <button type="submit" class="btn btn-sm btn-success">Approve</button>
+          </form>
+          <a class="btn btn-sm btn-outline-danger" href="{% url 'process_return' r.id 'Rejected' %}">Reject</a>
+          {% else %}
+            {% if r.processed_at %}{{ r.processed_at|date:"Y-m-d H:i" }}{% endif %}
+          {% endif %}
         </td>
-    </tr>
+      </tr>
+    {% empty %}
+      <tr><td colspan="8">No return requests.</td></tr>
     {% endfor %}
-</table>
-
-<!-- Go Back Button -->
-<div style="text-align: center;">
-    <button 
-        onclick="window.history.back()" 
-        style="padding: 10px 20px; font-size: 16px; background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">
-        ← Go Back
-    </button>
+    </tbody>
+  </table>
+  </div>
 </div>
 {% endblock %}
