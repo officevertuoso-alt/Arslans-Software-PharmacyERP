@@ -60,4 +60,16 @@ urlpatterns = [
     path('reports/daily-closing/', views.daily_closing, name='daily_closing'),
     path('backup/', views.backup_database, name='backup_database'),
     path('restore/', views.restore_database, name='restore_database'),
+
+    # Cashbook, charts, master catalog, notifications
+    path('cashbook/', views.cashbook_list, name='cashbook_list'),
+    path('charts/', views.charts_dashboard, name='charts_dashboard'),
+    path('api/charts-data/', views.charts_data_api, name='charts_data_api'),
+    path('medicine-master/', views.medicine_master_list, name='medicine_master_list'),
+    path('medicine-master/suggest/', views.medicine_master_suggest, name='medicine_master_suggest'),
+    path('medicine-master/export/', views.medicine_master_export, name='medicine_master_export'),
+    path('medicine-master/import/', views.medicine_master_import, name='medicine_master_import'),
+    path('notifications/', views.notifications_list, name='notifications_list'),
+    path('api/notifications/', views.notifications_poll, name='notifications_poll'),
+    path('notifications/refresh/', views.refresh_alerts, name='refresh_alerts'),
 ]
