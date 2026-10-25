@@ -78,6 +78,7 @@ urlpatterns = [
     # Fast POS
     path('pos/', views.pos_screen, name='pos_screen'),
     path('pos/search/', views.pos_search, name='pos_search'),
+    path('pos/alternates/', views.pos_alternates, name='pos_alternates'),
     path('pos/scan/', views.pos_scan, name='pos_scan'),
     path('pos/add/', views.pos_add, name='pos_add'),
     path('pos/qty/', views.pos_qty, name='pos_qty'),
