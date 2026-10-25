@@ -1,5 +1,5 @@
 from django.shortcuts import render, get_object_or_404, redirect
-from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation, SupplierPurchase, SupplierPurchaseLine, SupplierPayment, CashbookEntry, MedicineMaster, AppNotification, CreditDue, StockAdjustment, PosShift
+from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation, SupplierPurchase, SupplierPurchaseLine, SupplierPayment, CashbookEntry, MedicineMaster, AppNotification, CreditDue, StockAdjustment, PosShift, CustomerParty, SaleInvoice, AuditLog, SupplierReturn, PurchaseOrder, PurchaseOrderLine
 from datetime import timedelta
 from django.utils import timezone
 from django.contrib import messages
@@ -2061,6 +2061,21 @@ if credit_needed > 0 and not profile.can_take_credit(credit_needed):
         with transaction.atomic():
             last_sale = None
             bill_number = _next_bill_number()
+            inv = SaleInvoice.objects.create(
+                bill_number=bill_number,
+                customer_user=request.user,
+                walk_in_name=(request.POST.get('walk_in_name') or '')[:120],
+                walk_in_phone=(request.POST.get('walk_in_phone') or request.POST.get('customer_phone') or '')[:20],
+                subtotal=bill_total,
+                discount_amount=Decimal('0.00'),
+                total=bill_total,
+                amount_paid=amount_paid,
+                amount_on_credit=credit_needed,
+                payment_method=payment_method,
+                created_by=request.user,
+                shift=_open_shift(request),
+            )
+
             try:
                 bill_discount = Decimal(str(request.POST.get('bill_discount') or '0')).quantize(Decimal('0.01'))
             except Exception:
@@ -2141,6 +2156,7 @@ if credit_needed > 0 and not profile.can_take_credit(credit_needed):
                     walk_in_phone=walk_phone,
                     discount_amount=line_disc,
                     bill_number=bill_number,
+                    sale_invoice=inv,
                     rx_number=rx_number if needs_rx_items else '',
                     rx_doctor=rx_doctor if needs_rx_items else '',
                     rx_patient=rx_patient if needs_rx_items else '',
@@ -2521,6 +2537,215 @@ def preload_medicines_ui(request):
     return render(request, 'inventory/preload_medicines.html', {
         'total_catalog': MedicineMaster.objects.count(),
     })
+
+def _audit(user, action, detail=''):
+    try:
+        AuditLog.objects.create(user=user, action=action, detail=(detail or '')[:2000])
+    except Exception:
+        pass
+
+
+@admin_required
+def customer_party_list(request):
+    q = (request.GET.get('q') or '').strip()
+    qs = CustomerParty.objects.filter(is_active=True)
+    if q:
+        from django.db import models as djmodels
+        qs = qs.filter(djmodels.Q(name__icontains=q) | djmodels.Q(phone__icontains=q))
+    if request.method == 'POST':
+        name = (request.POST.get('name') or '').strip()
+        phone = (request.POST.get('phone') or '').strip()
+        if name:
+            CustomerParty.objects.create(
+                name=name[:120],
+                phone=phone[:20],
+                address=(request.POST.get('address') or '')[:255],
+                credit_limit=Decimal(str(request.POST.get('credit_limit') or '50000')),
+            )
+            messages.success(request, 'Customer saved.')
+            return redirect('customer_party_list')
+    return render(request, 'inventory/customer_party_list.html', {
+        'parties': qs[:100], 'q': q, 'currency': CURRENCY_SYMBOL,
+    })
+
+
+@admin_required
+def invoice_list(request):
+    inv = SaleInvoice.objects.select_related('customer_party', 'created_by')[:100]
+    return render(request, 'inventory/invoice_list.html', {'invoices': inv, 'currency': CURRENCY_SYMBOL})
+
+
+@admin_required
+def invoice_void(request, bill_number):
+    """Same-day void: restock FEFO reverse is approximate — restore product qty from lines."""
+    inv = get_object_or_404(SaleInvoice, bill_number=bill_number)
+    if inv.is_void:
+        messages.error(request, 'Already voided.')
+        return redirect('invoice_list')
+    # only today
+    if inv.created_at.date() != timezone.now().date() and not request.user.is_superuser:
+        messages.error(request, 'Only same-day voids allowed (or superuser).')
+        return redirect('invoice_list')
+    if request.method == 'POST':
+        reason = (request.POST.get('reason') or '').strip()
+        if not reason:
+            messages.error(request, 'Reason required.')
+            return redirect('invoice_void', bill_number=bill_number)
+        with transaction.atomic():
+            for line in Purchase.objects.select_for_update().filter(bill_number=bill_number, is_void=False):
+                product = Product.objects.select_for_update().get(pk=line.product_id)
+                product.quantity += line.quantity
+                product.save(update_fields=['quantity'])
+                line.is_void = True
+                line.save(update_fields=['is_void'])
+            if inv.amount_on_credit > 0 and inv.customer_party_id:
+                party = CustomerParty.objects.select_for_update().get(pk=inv.customer_party_id)
+                party.balance = max(Decimal('0.00'), (party.balance - inv.amount_on_credit).quantize(Decimal('0.01')))
+                party.save(update_fields=['balance'])
+            inv.is_void = True
+            inv.void_reason = reason[:255]
+            inv.voided_at = timezone.now()
+            inv.voided_by = request.user
+            inv.save()
+            post_cashbook(
+                entry_type=CashbookEntry.TYPE_ADJUSTMENT,
+                amount=-(inv.amount_paid or Decimal('0')),
+                user=request.user,
+                description=f'Void bill {bill_number}',
+                reference=bill_number,
+            )
+            _audit(request.user, 'void_invoice', f'{bill_number}: {reason}')
+        messages.success(request, f'Bill {bill_number} voided.')
+        return redirect('invoice_list')
+    return render(request, 'inventory/invoice_void.html', {'inv': inv, 'currency': CURRENCY_SYMBOL})
+
+
+@admin_required
+def supplier_return_create(request):
+    products = Product.objects.order_by('name')[:500]
+    suppliers = Supplier.objects.order_by('name')
+    if request.method == 'POST':
+        try:
+            sid = int(request.POST.get('supplier_id'))
+            pid = int(request.POST.get('product_id'))
+            qty = int(request.POST.get('quantity'))
+            unit_cost = Decimal(str(request.POST.get('unit_cost') or '0')).quantize(Decimal('0.01'))
+            reason = (request.POST.get('reason') or '')[:255]
+            with transaction.atomic():
+                product = Product.objects.select_for_update().get(pk=pid)
+                supplier = Supplier.objects.select_for_update().get(pk=sid)
+                if product.quantity < qty:
+                    raise ValueError('Not enough stock to return.')
+                # FEFO remove
+                if product.batches.filter(is_active=True, quantity__gt=0).exists():
+                    plan = product.allocate_fefo(qty)
+                    for batch, take in plan:
+                        batch.quantity -= take
+                        if batch.quantity == 0:
+                            batch.is_active = False
+                        batch.save(update_fields=['quantity', 'is_active'])
+                    product.sync_quantity_from_batches()
+                else:
+                    product.quantity -= qty
+                    product.save(update_fields=['quantity'])
+                total = (unit_cost * qty).quantize(Decimal('0.01'))
+                SupplierReturn.objects.create(
+                    supplier=supplier, product=product, quantity=qty,
+                    unit_cost=unit_cost, total_amount=total, reason=reason,
+                    created_by=request.user,
+                )
+                supplier.balance = (Decimal(str(supplier.balance)) - total).quantize(Decimal('0.01'))
+                supplier.save(update_fields=['balance'])
+                post_cashbook(
+                    entry_type=CashbookEntry.TYPE_PURCHASE_RETURN,
+                    amount=total,  # money in / liability down tracked as positive recovery of goods
+                    user=request.user,
+                    description=f'Supplier return {product.name} x{qty}',
+                    supplier=supplier,
+                )
+            messages.success(request, 'Supplier return recorded.')
+            return redirect('supplier_return_list')
+        except Exception as e:
+            messages.error(request, str(e))
+    return render(request, 'inventory/supplier_return_form.html', {
+        'products': products, 'suppliers': suppliers, 'currency': CURRENCY_SYMBOL,
+    })
+
+
+@admin_required
+def supplier_return_list(request):
+    rows = SupplierReturn.objects.select_related('supplier', 'product')[:100]
+    return render(request, 'inventory/supplier_return_list.html', {'rows': rows, 'currency': CURRENCY_SYMBOL})
+
+
+@admin_required
+def auto_purchase_order(request):
+    """Create draft PO from low-stock products."""
+    low = [p for p in Product.objects.all() if p.is_low_stock]
+    if request.method == 'POST' and low:
+        po = PurchaseOrder.objects.create(
+            status=PurchaseOrder.STATUS_DRAFT,
+            notes='Auto from low stock',
+            created_by=request.user,
+        )
+        for p in low:
+            need = max(1, (p.low_stock_threshold or 10) * 2 - p.quantity)
+            PurchaseOrderLine.objects.create(order=po, product=p, quantity=need)
+        _audit(request.user, 'auto_po', f'PO#{po.id} lines={len(low)}')
+        messages.success(request, f'Draft PO #{po.id} with {len(low)} lines.')
+        return redirect('purchase_order_detail', pk=po.id)
+    return render(request, 'inventory/auto_po.html', {'low': low})
+
+
+@admin_required
+def purchase_order_detail(request, pk):
+    po = get_object_or_404(PurchaseOrder, pk=pk)
+    return render(request, 'inventory/purchase_order_detail.html', {'po': po})
+
+
+@admin_required
+def controlled_register(request):
+    """Report of controlled/Rx sales."""
+    qs = Purchase.objects.filter(
+        product__is_controlled=True
+    ).select_related('product', 'customer').order_by('-purchase_date')[:200]
+    # also requires_rx
+    qs2 = Purchase.objects.filter(product__requires_rx=True).exclude(
+        product__is_controlled=True
+    ).select_related('product', 'customer').order_by('-purchase_date')[:100]
+    return render(request, 'inventory/controlled_register.html', {
+        'controlled': qs, 'rx_required': qs2, 'currency': CURRENCY_SYMBOL,
+    })
+
+
+@admin_required
+def simple_pnl(request):
+    """Rough P&L: sales revenue - COGS estimate - expenses."""
+    from datetime import timedelta
+    days = int(request.GET.get('days') or 30)
+    start = timezone.now() - timedelta(days=days)
+    sales = Purchase.objects.filter(purchase_date__gte=start, is_void=False)
+    revenue = sum((s.total_price - s.discount_amount for s in sales), Decimal('0.00'))
+    cogs = Decimal('0.00')
+    for alloc in SaleBatchAllocation.objects.filter(sale__purchase_date__gte=start, sale__is_void=False).select_related('batch'):
+        cogs += Decimal(alloc.quantity) * Decimal(alloc.batch.purchase_cost or 0)
+    expenses = Decimal('0.00')
+    for e in CashbookEntry.objects.filter(entry_type=CashbookEntry.TYPE_EXPENSE, created_at__gte=start):
+        expenses += abs(e.amount)
+    gross = (revenue - cogs).quantize(Decimal('0.01'))
+    net = (gross - expenses).quantize(Decimal('0.01'))
+    return render(request, 'inventory/simple_pnl.html', {
+        'days': days, 'revenue': revenue.quantize(Decimal('0.01')),
+        'cogs': cogs.quantize(Decimal('0.01')), 'expenses': expenses.quantize(Decimal('0.01')),
+        'gross': gross, 'net': net, 'currency': CURRENCY_SYMBOL,
+    })
+
+
+@admin_required
+def audit_log_list(request):
+    logs = AuditLog.objects.select_related('user')[:200]
+    return render(request, 'inventory/audit_log.html', {'logs': logs})
+
 def custom_404(request, exception=None):
     return render(request, 'inventory/404.html', status=404)
 
