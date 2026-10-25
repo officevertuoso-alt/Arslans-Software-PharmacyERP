@@ -19,4 +19,4 @@ class SupplierForm(forms.ModelForm):
 class ReturnForm(forms.ModelForm):
     class Meta:
         model = Return
-        fields = ['product', 'sale', 'quantity', 'reason', 'barcode_number', 'units_per_pack', 'allow_loose']
+        fields = ['product', 'sale', 'quantity', 'reason', 'barcode_number', 'generic_name', 'units_per_pack', 'allow_loose']
