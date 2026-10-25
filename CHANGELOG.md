@@ -134,3 +134,19 @@
 - Files stored under `backups/` (gitignored)
 
 No new DB migration required for Phase 6.
+
+
+## [Phase 7] — 2026-10-26 — Bilingual Urdu + English
+
+### i18n
+- Language switcher in navbar (English / اردو)
+- Django `set_language` via `/i18n/`
+- `locale/ur/LC_MESSAGES/django.po` + compiled `.mo`
+- Base navigation and key labels use `{% trans %}`
+
+### Branding
+- Navbar title: **Arslan's Software**
+
+### Note
+If you add more strings, run on a machine with gettext:
+`django-admin makemessages -l ur` then `django-admin compilemessages`
