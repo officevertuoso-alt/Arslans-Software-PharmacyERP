@@ -1,0 +1,58 @@
+{% extends 'inventory/base.html' %}
+{% block title %}SMS / WhatsApp{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h2>SMS / WhatsApp gateway</h2>
+  <div class="alert {% if enabled %}alert-success{% else %}alert-warning{% endif %}">
+    Messaging enabled: <strong>{{ enabled }}</strong>
+    · SMS provider: <code>{{ sms_provider }}</code>
+    · WhatsApp: <code>{{ wa_provider }}</code>
+    <div class="small mt-1">Set env <code>MESSAGING_ENABLED=1</code> and provider keys. Default is console (safe testing).</div>
+  </div>
+  <div class="row g-3">
+    <div class="col-md-6">
+      <form method="post" class="card card-body">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="test">
+        <h5>Send test</h5>
+        <input name="phone" class="form-control mb-2" placeholder="03xx-xxxxxxx" required>
+        <select name="channel" class="form-select mb-2">
+          <option value="sms">SMS</option>
+          <option value="whatsapp">WhatsApp</option>
+        </select>
+        <textarea name="body" class="form-control mb-2" rows="2">Test from Arslan Software Pharmacy.</textarea>
+        <button class="btn btn-primary">Send test</button>
+      </form>
+    </div>
+    <div class="col-md-6">
+      <form method="post" class="card card-body">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="due_reminders">
+        <h5>Credit due reminders</h5>
+        <p class="small text-muted">Unsettled CreditDue with phone (due today or overdue).</p>
+        <select name="channel" class="form-select mb-2">
+          <option value="sms">SMS</option>
+          <option value="whatsapp">WhatsApp</option>
+        </select>
+        <button class="btn btn-warning" onclick="return confirm('Send due reminders now?');">Send due reminders</button>
+      </form>
+    </div>
+  </div>
+  <h5 class="mt-4">Message log</h5>
+  <table class="table table-sm table-striped">
+    <thead><tr><th>When</th><th>Ch</th><th>To</th><th>Status</th><th>Purpose</th><th>Body</th></tr></thead>
+    <tbody>
+    {% for l in logs %}
+      <tr>
+        <td>{{ l.created_at|date:"Y-m-d H:i" }}</td>
+        <td>{{ l.channel }}</td>
+        <td>{{ l.to_phone }}</td>
+        <td>{{ l.status }}</td>
+        <td>{{ l.purpose }}</td>
+        <td class="small">{{ l.body|truncatechars:80 }}</td>
+      </tr>
+    {% empty %}<tr><td colspan="6">No messages yet</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
