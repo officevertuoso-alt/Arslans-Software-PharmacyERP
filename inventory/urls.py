@@ -96,4 +96,15 @@ urlpatterns = [
 
     path('shift/open/', views.shift_open, name='shift_open'),
     path('shift/close/', views.shift_close, name='shift_close'),
+
+    path('customers/parties/', views.customer_party_list, name='customer_party_list'),
+    path('invoices/', views.invoice_list, name='invoice_list'),
+    path('invoices/<str:bill_number>/void/', views.invoice_void, name='invoice_void'),
+    path('supplier-returns/', views.supplier_return_list, name='supplier_return_list'),
+    path('supplier-returns/add/', views.supplier_return_create, name='supplier_return_create'),
+    path('purchase-orders/auto/', views.auto_purchase_order, name='auto_purchase_order'),
+    path('purchase-orders/<int:pk>/', views.purchase_order_detail, name='purchase_order_detail'),
+    path('reports/controlled/', views.controlled_register, name='controlled_register'),
+    path('reports/pnl/', views.simple_pnl, name='simple_pnl'),
+    path('audit/', views.audit_log_list, name='audit_log_list'),
 ]
