@@ -55,3 +55,23 @@
 
 ### Migration
 - `0009_customer_credit_phase2.py`
+
+
+## [Phase 3] — 2026-10-26 — Batches + FEFO
+
+### Models
+- `ProductBatch` — batch_number, quantity, expiry, purchase_cost, supplier, FEFO ordering
+- `SaleBatchAllocation` — which batches were used on each sale
+- `Product.allocate_fefo()` / `sync_quantity_from_batches()` helpers
+
+### Sales
+- Checkout deducts stock from earliest-expiring non-expired batches first (FEFO)
+- Falls back to legacy `Product.quantity` when no batches exist yet
+- Allocations stored for audit
+
+### Receiving
+- `/batches/receive/` — goods receipt with lot number, expiry, cost
+- `/batches/` and `/batches/product/<id>/` — batch list with expiry highlighting
+
+### Migration
+- `0010_product_batch_fefo.py`
