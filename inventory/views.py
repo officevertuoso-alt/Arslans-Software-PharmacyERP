@@ -1,5 +1,5 @@
 from django.shortcuts import render, get_object_or_404, redirect
-from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation, SupplierPurchase, SupplierPurchaseLine, SupplierPayment, CashbookEntry, MedicineMaster, AppNotification, CreditDue
+from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation, SupplierPurchase, SupplierPurchaseLine, SupplierPayment, CashbookEntry, MedicineMaster, AppNotification, CreditDue, StockAdjustment
 from datetime import timedelta
 from django.utils import timezone
 from django.contrib import messages
@@ -1702,30 +1702,40 @@ def _pos_json(cart):
 
 
 def _pos_find_product(code):
-    """Resolve barcode / id / name to a Product."""
+    """Resolve barcode_number / id / name to a Product."""
     code = (code or '').strip()
     if not code:
         return None
-    # numeric id
+    p = Product.objects.filter(barcode_number__iexact=code).first()
+    if p:
+        return p
     if code.isdigit():
-        pid = int(code)
-        # also try EAN-style trailing id
-        p = Product.objects.filter(pk=pid).first()
+        p = Product.objects.filter(pk=int(code)).first()
         if p:
             return p
-        # strip leading zeros from 13-digit style
         try:
-            p = Product.objects.filter(pk=int(code[-6:] or '0')).first()
+            p = Product.objects.filter(pk=int(code.lstrip('0') or '0')).first()
             if p:
                 return p
         except Exception:
             pass
-    # exact name
     p = Product.objects.filter(name__iexact=code).first()
     if p:
         return p
-    # startswith
     return Product.objects.filter(name__istartswith=code).order_by('name').first()
+
+
+def _next_bill_number():
+    from django.utils import timezone as tz
+    prefix = tz.now().strftime('B%Y%m%d')
+    last = Purchase.objects.filter(bill_number__startswith=prefix).order_by('-bill_number').values_list('bill_number', flat=True).first()
+    seq = 1
+    if last and len(last) > len(prefix):
+        try:
+            seq = int(last[len(prefix):]) + 1
+        except ValueError:
+            seq = 1
+    return f'{prefix}{seq:04d}'
 
 
 def _pos_add_line(cart, product, qty=1):
@@ -1762,11 +1772,13 @@ def _pos_add_line(cart, product, qty=1):
 def pos_screen(request):
     cart = _pos_cart(request)
     count, total = _pos_totals(cart)
+    held = request.session.get('pos_held', [])
     return render(request, 'inventory/pos.html', {
         'cart': cart,
         'cart_count': count,
         'cart_total': total,
         'currency': CURRENCY_SYMBOL,
+        'held_bills': held,
     })
 
 
@@ -1942,6 +1954,28 @@ def pos_pay(request):
     try:
         with transaction.atomic():
             last_sale = None
+            bill_number = _next_bill_number()
+            try:
+                bill_discount = Decimal(str(request.POST.get('bill_discount') or '0')).quantize(Decimal('0.01'))
+            except Exception:
+                bill_discount = Decimal('0.00')
+            if bill_discount < 0:
+                bill_discount = Decimal('0.00')
+            walk_name = (request.POST.get('walk_in_name') or '')[:120]
+            walk_phone = (request.POST.get('walk_in_phone') or request.POST.get('customer_phone') or '')[:20]
+            # distribute discount across lines by share
+            for line in cart:
+                line['_share_discount'] = Decimal('0.00')
+            if bill_discount > 0 and bill_total > 0:
+                remaining_disc = bill_discount
+                for i, line in enumerate(cart):
+                    lt = Decimal(str(line['line_total']))
+                    if i == len(cart) - 1:
+                        share = remaining_disc
+                    else:
+                        share = (bill_discount * (lt / bill_total)).quantize(Decimal('0.01'))
+                        remaining_disc -= share
+                    line['_share_discount'] = share
             for line in cart:
                 product = Product.objects.select_for_update().get(pk=line['product_id'])
                 qty = int(line['qty'])
@@ -1977,6 +2011,17 @@ def pos_pay(request):
                     product.quantity -= qty
                     product.save(update_fields=['quantity'])
 
+                line_disc = Decimal(str(line.get('_share_discount') or 0))
+                net_line = (line_total - line_disc).quantize(Decimal('0.01'))
+                if net_line < 0:
+                    net_line = Decimal('0.00')
+                # re-scale paid/credit on net
+                if bill_total > 0:
+                    net_bill = (bill_total - bill_discount).quantize(Decimal('0.01'))
+                    if net_bill < 0:
+                        net_bill = Decimal('0.00')
+                    # recompute global paid already set; proportional on net_line
+                    pass
                 sale = Purchase.objects.create(
                     product=product,
                     customer=request.user,
@@ -1986,6 +2031,10 @@ def pos_pay(request):
                     amount_on_credit=line_credit,
                     payment_method=payment_method,
                     notes='POS multi-item',
+                    walk_in_name=walk_name,
+                    walk_in_phone=walk_phone,
+                    discount_amount=line_disc,
+                    bill_number=bill_number,
                 )
                 last_sale = sale
                 for batch, take in plan:
@@ -2026,18 +2075,127 @@ def pos_pay(request):
         _pos_save(request, [])
         messages.success(
             request,
-            f"POS sale complete. Bill {CURRENCY_SYMBOL}{bill_total}. "
+            f"POS sale complete. Bill {bill_number} {CURRENCY_SYMBOL}{bill_total}. "
             f"Paid {CURRENCY_SYMBOL}{amount_paid}"
             + (f", credit {CURRENCY_SYMBOL}{credit_needed}" if credit_needed else "")
             + "."
         )
-        return redirect('pos_screen')
+        return redirect('receipt_view', bill_number=bill_number)
     except ValueError as e:
         messages.error(request, str(e))
         return redirect('pos_screen')
     except Exception as e:
         messages.error(request, f"Sale failed: {e}")
         return redirect('pos_screen')
+
+
+@login_required
+def pos_hold(request):
+    """Park current cart as a held bill."""
+    from django.http import JsonResponse
+    cart = _pos_cart(request)
+    if not cart:
+        return JsonResponse({'error': 'Cart empty'}, status=400)
+    held = request.session.get('pos_held', [])
+    label = (request.POST.get('label') or '').strip() or f'Hold {len(held)+1}'
+    held.append({'label': label, 'cart': cart, 'at': timezone.now().isoformat()})
+    request.session['pos_held'] = held
+    request.session.modified = True
+    _pos_save(request, [])
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return JsonResponse({'ok': True, 'held_count': len(held)})
+    messages.success(request, f'Bill held as "{label}".')
+    return redirect('pos_screen')
+
+
+@login_required
+def pos_recall(request, idx):
+    held = request.session.get('pos_held', [])
+    try:
+        idx = int(idx)
+        item = held.pop(idx)
+    except (IndexError, ValueError, TypeError):
+        messages.error(request, 'Hold not found.')
+        return redirect('pos_screen')
+    request.session['pos_held'] = held
+    _pos_save(request, item.get('cart') or [])
+    request.session.modified = True
+    messages.info(request, f'Recalled: {item.get("label")}')
+    return redirect('pos_screen')
+
+
+@login_required
+def receipt_view(request, bill_number):
+    """Printable thermal-style receipt for a bill number (all lines sharing bill_number)."""
+    lines = list(
+        Purchase.objects.filter(bill_number=bill_number).select_related('product').order_by('id')
+    )
+    if not lines:
+        raise Http404('Bill not found')
+    subtotal = sum((l.total_price for l in lines), Decimal('0.00'))
+    discount = sum((l.discount_amount for l in lines), Decimal('0.00'))
+    paid = sum((l.amount_paid for l in lines), Decimal('0.00'))
+    credit = sum((l.amount_on_credit for l in lines), Decimal('0.00'))
+    return render(request, 'inventory/receipt.html', {
+        'lines': lines,
+        'bill_number': bill_number,
+        'subtotal': subtotal,
+        'discount': discount,
+        'paid': paid,
+        'credit': credit,
+        'total': (subtotal - discount).quantize(Decimal('0.01')),
+        'currency': CURRENCY_SYMBOL,
+        'when': lines[0].purchase_date,
+        'walk_in_name': lines[0].walk_in_name,
+        'walk_in_phone': lines[0].walk_in_phone,
+    })
+
+
+@admin_required
+def stock_adjust(request):
+    products = Product.objects.order_by('name')[:500]
+    if request.method == 'POST':
+        try:
+            pid = int(request.POST.get('product_id'))
+            new_qty = int(request.POST.get('quantity_after'))
+            reason = request.POST.get('reason') or 'count'
+            notes = (request.POST.get('notes') or '')[:255]
+            product = Product.objects.select_for_update().get(pk=pid) if False else Product.objects.get(pk=pid)
+            with transaction.atomic():
+                product = Product.objects.select_for_update().get(pk=pid)
+                before = product.quantity
+                delta = new_qty - before
+                product.quantity = max(0, new_qty)
+                product.save(update_fields=['quantity'])
+                # If batches exist and reducing, FEFO-reduce; if increasing without batch, leave product qty only
+                if delta < 0 and product.batches.filter(is_active=True, quantity__gt=0).exists():
+                    need = -delta
+                    plan = product.allocate_fefo(need)
+                    for batch, take in plan:
+                        batch.quantity -= take
+                        if batch.quantity == 0:
+                            batch.is_active = False
+                        batch.save(update_fields=['quantity', 'is_active'])
+                    product.sync_quantity_from_batches()
+                StockAdjustment.objects.create(
+                    product=product,
+                    quantity_before=before,
+                    quantity_after=product.quantity,
+                    quantity_delta=product.quantity - before,
+                    reason=reason if reason in dict(StockAdjustment.REASON_CHOICES) else 'other',
+                    notes=notes,
+                    created_by=request.user,
+                )
+            messages.success(request, f'Adjusted {product.name}: {before} → {product.quantity}')
+            return redirect('stock_adjust')
+        except Exception as e:
+            messages.error(request, f'Adjustment failed: {e}')
+    recent = StockAdjustment.objects.select_related('product')[:30]
+    return render(request, 'inventory/stock_adjust.html', {
+        'products': products,
+        'recent': recent,
+        'reasons': StockAdjustment.REASON_CHOICES,
+    })
 
 def custom_404(request, exception=None):
     return render(request, 'inventory/404.html', status=404)
