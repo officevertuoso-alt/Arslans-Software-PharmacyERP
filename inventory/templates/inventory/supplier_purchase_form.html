@@ -1,0 +1,74 @@
+{% extends 'inventory/base.html' %}
+{% block title %}New Supplier Purchase{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h2>New supplier purchase (receive goods)</h2>
+  <p class="text-muted">Creates batches (FEFO), increases stock, and updates supplier payable balance.</p>
+  <form method="post" id="purchase-form">
+    {% csrf_token %}
+    <div class="row g-2 mb-3">
+      <div class="col-md-4">
+        <label class="form-label">Supplier</label>
+        <select name="supplier_id" class="form-select" required>
+          <option value="">— select —</option>
+          {% for s in suppliers %}
+            <option value="{{ s.id }}">{{ s.name }} (bal {{ currency }}{{ s.balance|floatformat:2 }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Invoice number</label>
+        <input type="text" name="invoice_number" class="form-control" required maxlength="64">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label">Invoice date</label>
+        <input type="date" name="invoice_date" class="form-control" value="{{ today }}" required>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">Tax (Rs.)</label>
+        <input type="number" step="0.01" min="0" name="tax" class="form-control" value="0">
+      </div>
+    </div>
+
+    <h5>Line items</h5>
+    <div id="lines">
+      <div class="row g-2 mb-2 line-row">
+        <div class="col-md-3">
+          <select name="product_id" class="form-select" required>
+            <option value="">Product</option>
+            {% for p in products %}
+              <option value="{{ p.id }}">{{ p.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-2"><input type="text" name="batch_number" class="form-control" placeholder="Batch #" required></div>
+        <div class="col-md-1"><input type="number" name="quantity" class="form-control" min="1" placeholder="Qty" required></div>
+        <div class="col-md-2"><input type="number" step="0.01" min="0" name="unit_cost" class="form-control" placeholder="Cost" value="0"></div>
+        <div class="col-md-2"><input type="date" name="expiry_date" class="form-control" required></div>
+      </div>
+    </div>
+    <button type="button" class="btn btn-outline-secondary btn-sm mb-3" onclick="addLine()">+ Add line</button>
+
+    <div class="row g-2 mb-3">
+      <div class="col-md-4">
+        <label class="form-label">Amount paid now (Rs.)</label>
+        <input type="number" step="0.01" min="0" name="amount_paid" class="form-control" value="0">
+      </div>
+      <div class="col-md-8">
+        <label class="form-label">Notes</label>
+        <input type="text" name="notes" class="form-control">
+      </div>
+    </div>
+    <button type="submit" class="btn btn-success">Receive purchase</button>
+    <a href="{% url 'supplier_purchase_list' %}" class="btn btn-secondary">Cancel</a>
+  </form>
+</div>
+<script>
+function addLine(){
+  var row = document.querySelector('.line-row').cloneNode(true);
+  row.querySelectorAll('input').forEach(i => { if(i.type!=='hidden') i.value=''; });
+  row.querySelectorAll('select').forEach(s => s.selectedIndex=0);
+  document.getElementById('lines').appendChild(row);
+}
+</script>
+{% endblock %}
