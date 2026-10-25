@@ -1,0 +1,70 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Reports - Arslan's Software{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>Reports dashboard</h2>
+    <div class="btn-group">
+      <a class="btn btn-outline-primary" href="{% url 'daily_closing' %}">Daily closing</a>
+      <a class="btn btn-success" href="{% url 'backup_database' %}">Download backup</a>
+      <a class="btn btn-warning" href="{% url 'restore_database' %}">Restore</a>
+    </div>
+  </div>
+
+  <div class="row g-3">
+    <div class="col-md-3">
+      <div class="card border-primary h-100"><div class="card-body">
+        <h6 class="text-muted">Sales today</h6>
+        <h3>{{ currency }}{{ revenue_today|floatformat:2 }}</h3>
+        <small>{{ sales_today_count }} bills · Cash {{ currency }}{{ collected_today|floatformat:2 }} · Credit {{ currency }}{{ credit_today|floatformat:2 }}</small>
+      </div></div>
+    </div>
+    <div class="col-md-3">
+      <div class="card border-success h-100"><div class="card-body">
+        <h6 class="text-muted">Revenue (7 days)</h6>
+        <h3>{{ currency }}{{ revenue_week|floatformat:2 }}</h3>
+        <small>Est. COGS {{ currency }}{{ cogs_week|floatformat:2 }} · Gross profit {{ currency }}{{ gross_profit_week|floatformat:2 }}</small>
+      </div></div>
+    </div>
+    <div class="col-md-3">
+      <div class="card border-info h-100"><div class="card-body">
+        <h6 class="text-muted">Stock value</h6>
+        <h3>{{ currency }}{{ stock_sell|floatformat:2 }}</h3>
+        <small>At cost {{ currency }}{{ stock_cost|floatformat:2 }}</small>
+      </div></div>
+    </div>
+    <div class="col-md-3">
+      <div class="card border-warning h-100"><div class="card-body">
+        <h6 class="text-muted">Receivables / Payables</h6>
+        <h3>{{ currency }}{{ receivables|floatformat:2 }}</h3>
+        <small>Customer udhaar · We owe suppliers {{ currency }}{{ payables|floatformat:2 }}</small>
+      </div></div>
+    </div>
+  </div>
+
+  <div class="row g-3 mt-1">
+    <div class="col-md-4">
+      <div class="card h-100"><div class="card-body">
+        <h6>All-time sales revenue</h6>
+        <h4>{{ currency }}{{ revenue_all|floatformat:2 }}</h4>
+      </div></div>
+    </div>
+    <div class="col-md-8">
+      <div class="card h-100"><div class="card-body">
+        <h6>Stock alerts</h6>
+        <p class="mb-0">
+          Low stock: <strong>{{ low_stock }}</strong> &nbsp;|&nbsp;
+          Expiring ≤7 days: <strong>{{ expiring }}</strong> &nbsp;|&nbsp;
+          Expired: <strong>{{ expired }}</strong>
+        </p>
+        <div class="mt-2">
+          <a href="{% url 'low_stock' %}">Low stock</a> ·
+          <a href="{% url 'expiring_soon' %}">Expiring soon</a> ·
+          <a href="{% url 'expired_products' %}">Expired</a> ·
+          <a href="{% url 'income_report' %}">Income detail</a>
+        </div>
+      </div></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
