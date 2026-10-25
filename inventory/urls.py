@@ -48,4 +48,10 @@ urlpatterns = [
     path('batches/product/<int:product_id>/', views.batch_list, name='batch_list_product'),
     path('batches/receive/', views.receive_batch, name='receive_batch'),
     path('batches/receive/<int:product_id>/', views.receive_batch, name='receive_batch'),
+
+    # Supplier purchases & payments
+    path('supplier-purchases/', views.supplier_purchase_list, name='supplier_purchase_list'),
+    path('supplier-purchases/add/', views.supplier_purchase_create, name='supplier_purchase_create'),
+    path('supplier-purchases/<int:pk>/', views.supplier_purchase_detail, name='supplier_purchase_detail'),
+    path('suppliers/<int:supplier_id>/pay/', views.supplier_pay, name='supplier_pay'),
 ]
