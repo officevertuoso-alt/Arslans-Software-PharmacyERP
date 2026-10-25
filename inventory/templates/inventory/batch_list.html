@@ -1,0 +1,41 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Batches - Arslan's Software{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>Product Batches {% if product %}— {{ product.name }}{% endif %}</h2>
+    <div>
+      <a class="btn btn-success" href="{% if product %}{% url 'receive_batch' product.id %}{% else %}{% url 'receive_batch' %}{% endif %}">Receive stock</a>
+      <a class="btn btn-secondary" href="{% url 'product_list' %}">Products</a>
+    </div>
+  </div>
+  <p class="text-muted">Sales use FEFO (first expired, first out). Expired batches are not sold.</p>
+  <div class="table-responsive">
+  <table class="table table-sm table-striped table-hover">
+    <thead>
+      <tr>
+        <th>Product</th><th>Batch #</th><th>Qty</th><th>Expiry</th><th>Days left</th>
+        <th>Cost/unit</th><th>Supplier</th><th>Active</th><th>Received</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for b in batches %}
+      <tr class="{% if b.expiry_date < today %}table-danger{% elif b.days_until_expiry <= 7 %}table-warning{% endif %}">
+        <td>{{ b.product.name }}</td>
+        <td>{{ b.batch_number }}</td>
+        <td>{{ b.quantity }}</td>
+        <td>{{ b.expiry_date }}</td>
+        <td>{% if b.expiry_date < today %}Expired{% else %}{{ b.days_until_expiry }}{% endif %}</td>
+        <td>{{ currency }}{{ b.purchase_cost|floatformat:2 }}</td>
+        <td>{{ b.supplier.name|default:"—" }}</td>
+        <td>{{ b.is_active|yesno:"Yes,No" }}</td>
+        <td>{{ b.received_date }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="9">No batches yet. Receive stock to create the first batch.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}
