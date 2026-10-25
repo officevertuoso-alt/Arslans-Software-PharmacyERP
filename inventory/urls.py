@@ -107,4 +107,6 @@ urlpatterns = [
     path('reports/controlled/', views.controlled_register, name='controlled_register'),
     path('reports/pnl/', views.simple_pnl, name='simple_pnl'),
     path('audit/', views.audit_log_list, name='audit_log_list'),
+
+    path('messaging/', views.messaging_center, name='messaging_center'),
 ]
