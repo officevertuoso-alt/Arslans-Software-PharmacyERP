@@ -1,0 +1,16 @@
+{% extends 'inventory/base.html' %}
+{% block title %}P&L{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h2>Simple P&amp;L (last {{ days }} days)</h2>
+  <form method="get" class="mb-3"><input type="number" name="days" value="{{ days }}" class="form-control d-inline-block" style="width:100px"> <button class="btn btn-sm btn-primary">Go</button></form>
+  <div class="row g-3">
+    <div class="col-md-3"><div class="card card-body"><small>Revenue</small><h4>{{ currency }}{{ revenue }}</h4></div></div>
+    <div class="col-md-3"><div class="card card-body"><small>Est. COGS</small><h4>{{ currency }}{{ cogs }}</h4></div></div>
+    <div class="col-md-3"><div class="card card-body"><small>Gross profit</small><h4>{{ currency }}{{ gross }}</h4></div></div>
+    <div class="col-md-3"><div class="card card-body"><small>Expenses</small><h4>{{ currency }}{{ expenses }}</h4></div></div>
+    <div class="col-md-4"><div class="card card-body border-success"><small>Net (approx)</small><h3>{{ currency }}{{ net }}</h3></div></div>
+  </div>
+  <p class="text-muted mt-3">COGS from batch purchase_cost when available. Not full double-entry accounting.</p>
+</div>
+{% endblock %}
