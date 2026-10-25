@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation, SupplierPurchase, SupplierPurchaseLine, SupplierPayment
+from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation, SupplierPurchase, SupplierPurchaseLine, SupplierPayment, CashbookEntry, MedicineMaster, AppNotification, CreditDue
 
 
 @admin.register(Product)
@@ -73,3 +73,27 @@ class SupplierPurchaseAdmin(admin.ModelAdmin):
 class SupplierPaymentAdmin(admin.ModelAdmin):
     list_display = ('supplier', 'amount', 'payment_method', 'paid_at', 'paid_by')
     list_filter = ('payment_method', 'paid_at')
+
+
+@admin.register(CashbookEntry)
+class CashbookEntryAdmin(admin.ModelAdmin):
+    list_display = ('entry_date', 'entry_type', 'expense_category', 'amount', 'payment_channel', 'description')
+    list_filter = ('entry_type', 'expense_category', 'entry_date')
+
+
+@admin.register(MedicineMaster)
+class MedicineMasterAdmin(admin.ModelAdmin):
+    list_display = ('product_name', 'brand_name', 'company', 'pack_size', 'current_mrp', 'legacy_retail_price')
+    search_fields = ('product_name', 'brand_name', 'company')
+
+
+@admin.register(AppNotification)
+class AppNotificationAdmin(admin.ModelAdmin):
+    list_display = ('kind', 'title', 'is_read', 'created_at')
+    list_filter = ('kind', 'is_read')
+
+
+@admin.register(CreditDue)
+class CreditDueAdmin(admin.ModelAdmin):
+    list_display = ('customer', 'amount', 'due_date', 'phone', 'is_settled')
+    list_filter = ('is_settled', 'due_date')
