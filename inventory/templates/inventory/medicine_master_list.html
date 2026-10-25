@@ -1,0 +1,29 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Medicine Master{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <div class="d-flex justify-content-between mb-3">
+    <h2>Medicine master catalog <small class="text-muted">({{ total_catalog }} rows — not stock)</small></h2>
+    <div>
+      <a class="btn btn-success" href="{% url 'medicine_master_import' %}">Bulk import</a>
+      <a class="btn btn-outline-primary" href="{% url 'medicine_master_export' %}">Export CSV</a>
+    </div>
+  </div>
+  <form class="mb-3" method="get"><input name="q" value="{{ q }}" class="form-control" placeholder="Search brand / product / company"></form>
+  <table class="table table-sm table-striped">
+    <thead><tr><th>Product</th><th>Brand</th><th>Company</th><th>Pack</th><th>Legacy MRP</th><th>Current MRP</th></tr></thead>
+    <tbody>
+    {% for i in items %}
+      <tr>
+        <td>{{ i.product_name }}</td>
+        <td>{{ i.brand_name }}</td>
+        <td>{{ i.company }}</td>
+        <td>{{ i.pack_size }}</td>
+        <td>{{ i.legacy_retail_price|default:"—" }}</td>
+        <td>{{ i.current_mrp|default:"—" }}</td>
+      </tr>
+    {% empty %}<tr><td colspan="6">No rows. Use Bulk import with your Pakistan medicine Excel/CSV.</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
