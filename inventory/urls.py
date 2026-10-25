@@ -84,4 +84,9 @@ urlpatterns = [
     path('pos/remove/', views.pos_remove, name='pos_remove'),
     path('pos/clear/', views.pos_clear, name='pos_clear'),
     path('pos/pay/', views.pos_pay, name='pos_pay'),
+
+    path('pos/hold/', views.pos_hold, name='pos_hold'),
+    path('pos/recall/<int:idx>/', views.pos_recall, name='pos_recall'),
+    path('receipt/<str:bill_number>/', views.receipt_view, name='receipt_view'),
+    path('stock-adjust/', views.stock_adjust, name='stock_adjust'),
 ]
