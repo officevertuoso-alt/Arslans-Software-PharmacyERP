@@ -117,6 +117,14 @@
           <label class="form-label">Walk-in customer name</label>
           <input type="text" name="walk_in_name" class="form-control" placeholder="Optional">
         </div>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="checkbox" name="send_message" value="1" id="send_msg">
+          <label class="form-check-label" for="send_msg">Send bill via SMS/WhatsApp</label>
+        </div>
+        <select name="message_channel" class="form-select form-select-sm mb-2">
+          <option value="sms">SMS</option>
+          <option value="whatsapp">WhatsApp</option>
+        </select>
         <div id="rx-box" class="border border-danger rounded p-2 mb-2 bg-light" {% if not needs_rx %}style="display:none"{% endif %}>
           <h6 class="text-danger mb-2">Prescription (controlled / Rx item in cart)</h6>
           <input type="text" name="rx_number" class="form-control mb-1" placeholder="Rx number *">
