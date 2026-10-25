@@ -1,0 +1,55 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Receive Batch - Arslan's Software{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h2>Receive stock (batch)</h2>
+  <p class="text-muted">Enter supplier batch/lot number, quantity, expiry and cost. Stock is tracked per batch for FEFO sales.</p>
+  <form method="post" class="card card-body shadow-sm" style="max-width:640px">
+    {% csrf_token %}
+    <div class="mb-3">
+      <label class="form-label">Product</label>
+      <select name="product_id" class="form-select" required>
+        <option value="">— select —</option>
+        {% for p in products %}
+          <option value="{{ p.id }}" {% if product and product.id == p.id %}selected{% endif %}>{{ p.name }} (stock {{ p.quantity }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Batch / Lot number</label>
+      <input type="text" name="batch_number" class="form-control" required maxlength="64" placeholder="e.g. LOT-2026-A1">
+    </div>
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Quantity</label>
+        <input type="number" name="quantity" class="form-control" min="1" required>
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Expiry date</label>
+        <input type="date" name="expiry_date" class="form-control" required>
+      </div>
+    </div>
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Purchase cost / unit (Rs.)</label>
+        <input type="number" step="0.01" min="0" name="purchase_cost" class="form-control" value="0">
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Supplier (optional)</label>
+        <select name="supplier_id" class="form-select">
+          <option value="">— none —</option>
+          {% for s in suppliers %}
+            <option value="{{ s.id }}">{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Notes</label>
+      <input type="text" name="notes" class="form-control" maxlength="255">
+    </div>
+    <button type="submit" class="btn btn-success">Receive batch</button>
+    <a href="{% url 'batch_list' %}" class="btn btn-secondary">Cancel</a>
+  </form>
+</div>
+{% endblock %}
