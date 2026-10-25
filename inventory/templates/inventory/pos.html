@@ -19,7 +19,7 @@
   <div class="d-flex justify-content-between align-items-center mb-2">
     <h3 class="mb-0">POS / Sale &amp; Return</h3>
     <div class="pos-help">
-      <kbd>F2</kbd> focus search &nbsp;
+      <kbd>F2</kbd> search &nbsp; <kbd>F4</kbd> alternates &nbsp; <kbd>P</kbd> pack mode &nbsp;
       <kbd>Enter</kbd> add &nbsp;
       <kbd>↑↓</kbd> cart &nbsp;
       <kbd>+</kbd>/<kbd>-</kbd> qty &nbsp;
@@ -33,8 +33,18 @@
     <div>
       <div class="card card-body mb-2">
         <label class="form-label mb-1">Barcode / Product code / Name</label>
+        <div class="d-flex gap-2 align-items-center mb-1">
+          <div class="btn-group btn-group-sm" role="group">
+            <input type="radio" class="btn-check" name="sale-mode" id="mode-unit" value="unit" checked>
+            <label class="btn btn-outline-primary" for="mode-unit">Loose / unit</label>
+            <input type="radio" class="btn-check" name="sale-mode" id="mode-pack" value="pack">
+            <label class="btn btn-outline-primary" for="mode-pack">Full pack</label>
+          </div>
+          <span class="small text-muted" id="alt-hint"></span>
+        </div>
         <input type="text" id="scan-input" class="form-control form-control-lg pos-scan"
-               placeholder="Scan barcode or type name…" autocomplete="off" autofocus>
+               placeholder="Scan barcode or type name / generic…" autocomplete="off" autofocus>
+        <div id="alt-box" class="list-group mt-1" style="display:none"></div>
         <div id="search-results" class="list-group mt-1"></div>
       </div>
 
@@ -178,10 +188,15 @@
     });
   }
 
+  function saleMode(){
+    const el = document.querySelector('input[name="sale-mode"]:checked');
+    return el ? el.value : 'unit';
+  }
   function addProduct(id, qty){
     const fd = new FormData();
     fd.append('product_id', id);
     fd.append('qty', qty || 1);
+    fd.append('mode', saleMode());
     fd.append('csrfmiddlewaretoken', '{{ csrf_token }}');
     return fetch('{% url "pos_add" %}', { method:'POST', body: fd, headers:{'X-Requested-With':'XMLHttpRequest'} })
       .then(r => r.json()).then(d => {
@@ -218,15 +233,24 @@
         .then(r => r.json()).then(d => {
           suggestIdx = -1;
           results.innerHTML = (d.results||[]).map((p,i) =>
-            `<button type="button" class="list-group-item list-group-item-action" data-id="${p.id}" data-i="${i}">
-              <strong>${p.name}</strong> <span class="text-muted">Rs.${p.price}</span>
-              <span class="float-end">Stock ${p.stock}</span>
+            `<button type="button" class="list-group-item list-group-item-action" data-id="${p.id}" data-i="${i}"
+              data-upp="${p.units_per_pack||1}" data-loose="${p.allow_loose}">
+              <strong>${p.name}</strong>
+              ${p.generic ? '<span class="badge bg-secondary">'+p.generic+'</span>' : ''}
+              <span class="text-muted">Rs.${p.price}/pack</span>
+              <span class="float-end">${p.stock_display||('Stock '+p.stock)}</span>
             </button>`
           ).join('');
         });
     }, 120);
   });
 
+  document.getElementById('alt-box').addEventListener('click', function(e){
+    const btn = e.target.closest('[data-id]');
+    if (!btn) return;
+    addProduct(btn.dataset.id, 1);
+    document.getElementById('alt-box').style.display = 'none';
+  });
   results.addEventListener('click', function(e){
     const btn = e.target.closest('[data-id]');
     if (!btn) return;
@@ -281,6 +305,28 @@
     if (e.key === 'F2') { e.preventDefault(); focusScan(); return; }
     if (e.key === 'F12') { e.preventDefault(); if (!btnPay.disabled) document.getElementById('pay-form').requestSubmit(); return; }
     if (e.key === 'F9') { e.preventDefault(); document.getElementById('btn-hold').click(); return; }
+    if (e.key === 'F4') {
+      e.preventDefault();
+      const rows = [...cartBody.querySelectorAll('tr[data-pid]')];
+      const pid = (cartIdx >= 0 && rows[cartIdx]) ? rows[cartIdx].dataset.pid : null;
+      if (!pid) { alert('Select a cart line first (arrow keys), then F4 for alternates'); return; }
+      fetch('{% url "pos_alternates" %}?product_id=' + pid)
+        .then(r => r.json()).then(d => {
+          const box = document.getElementById('alt-box');
+          document.getElementById('alt-hint').textContent = d.generic ? ('Generic: ' + d.generic) : 'No generic set';
+          if (!(d.results||[]).length) { box.style.display='none'; alert('No alternates in stock for this generic'); return; }
+          box.style.display = 'block';
+          box.innerHTML = '<div class="list-group-item bg-light"><strong>Alternates (F4)</strong></div>' +
+            d.results.map(p => `<button type="button" class="list-group-item list-group-item-action" data-id="${p.id}">
+              ${p.name} — Rs.${p.price} — ${p.stock_display}</button>`).join('');
+        });
+      return;
+    }
+    if (e.key === 'p' || e.key === 'P') {
+      if (tag === 'input' || tag === 'select') return;
+      e.preventDefault();
+      document.getElementById('mode-pack').checked = true;
+    }
 
     const tag = (e.target.tagName||'').toLowerCase();
     if (tag === 'input' || tag === 'select' || tag === 'textarea') {
