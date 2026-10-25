@@ -1,0 +1,26 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Preload Medicines{% endblock %}
+{% block content %}
+<div class="container py-3" style="max-width:640px">
+  <h2>Preload Pakistan medicine catalog</h2>
+  <p>Loads <strong>MedicineMaster</strong> only (like Candela preloaded DB). <strong>Does not create stock.</strong> Current catalog rows: {{ total_catalog }}.</p>
+  <div class="alert alert-warning">Legacy prices are OLD — set Current MRP when you purchase. Always sell at or below pack MRP.</div>
+  <form method="post" enctype="multipart/form-data" class="card card-body">
+    {% csrf_token %}
+    <div class="mb-2">
+      <label class="form-label">Excel (optional — default uses built-in Pakistan Master List)</label>
+      <input type="file" name="file" accept=".xlsx" class="form-control">
+    </div>
+    <div class="mb-2">
+      <label class="form-label">Limit rows (0 = all ~41k)</label>
+      <input type="number" name="limit" value="0" class="form-control">
+    </div>
+    <div class="form-check mb-3">
+      <input class="form-check-input" type="checkbox" name="clear" value="1" id="clr">
+      <label class="form-check-label" for="clr">Clear existing catalog first</label>
+    </div>
+    <button class="btn btn-success">Start preload</button>
+    <a href="{% url 'medicine_master_list' %}" class="btn btn-secondary">Cancel</a>
+  </form>
+</div>
+{% endblock %}
