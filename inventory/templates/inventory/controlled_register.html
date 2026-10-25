@@ -1,0 +1,22 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Controlled register{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h2>Controlled / Rx sales register</h2>
+  <h5>Controlled</h5>
+  <table class="table table-sm table-striped">
+    <thead><tr><th>When</th><th>Product</th><th>Qty</th><th>Rx #</th><th>Doctor</th><th>Patient</th></tr></thead>
+    <tbody>{% for s in controlled %}
+      <tr><td>{{ s.purchase_date }}</td><td>{{ s.product.name }}</td><td>{{ s.quantity }}</td>
+      <td>{{ s.rx_number }}</td><td>{{ s.rx_doctor }}</td><td>{{ s.rx_patient }}</td></tr>
+    {% empty %}<tr><td colspan="6">None</td></tr>{% endfor %}</tbody>
+  </table>
+  <h5>Other Rx-required</h5>
+  <table class="table table-sm">
+    <thead><tr><th>When</th><th>Product</th><th>Rx #</th><th>Doctor</th></tr></thead>
+    <tbody>{% for s in rx_required %}
+      <tr><td>{{ s.purchase_date }}</td><td>{{ s.product.name }}</td><td>{{ s.rx_number }}</td><td>{{ s.rx_doctor }}</td></tr>
+    {% empty %}<tr><td colspan="4">None</td></tr>{% endfor %}</tbody>
+  </table>
+</div>
+{% endblock %}
