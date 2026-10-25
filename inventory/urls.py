@@ -74,4 +74,14 @@ urlpatterns = [
     path('notifications/refresh/', views.refresh_alerts, name='refresh_alerts'),
 
     path('api/customer-suggest/', views.customer_suggest, name='customer_suggest'),
+
+    # Fast POS
+    path('pos/', views.pos_screen, name='pos_screen'),
+    path('pos/search/', views.pos_search, name='pos_search'),
+    path('pos/scan/', views.pos_scan, name='pos_scan'),
+    path('pos/add/', views.pos_add, name='pos_add'),
+    path('pos/qty/', views.pos_qty, name='pos_qty'),
+    path('pos/remove/', views.pos_remove, name='pos_remove'),
+    path('pos/clear/', views.pos_clear, name='pos_clear'),
+    path('pos/pay/', views.pos_pay, name='pos_pay'),
 ]
