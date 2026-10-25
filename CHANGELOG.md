@@ -32,3 +32,26 @@
 - Full bilingual UI + reports
 - Backup / restore module
 - Automated tests & Windows installer
+
+## [Phase 2] — 2026-10-26 — Customer Credit (Udhaar)
+
+### Models
+- `CustomerProfile` — phone, address, credit_limit, balance (positive = owes pharmacy)
+- Auto-create profile on new User
+- `Purchase` (Sale) extended: `amount_paid`, `amount_on_credit`, `payment_method`, `notes`
+- `CustomerPayment` — payments against outstanding balance
+
+### Checkout
+- Full cash, full credit, or split (partial + udhaar)
+- Credit limited by `credit_limit - balance`
+- Atomic: stock + sale + balance update together
+
+### Staff tools
+- `/customers/ledger/` — all customer balances
+- `/customers/ledger/<id>/` — detail + receive payment
+
+### Customer
+- `/my-ledger/` — own sales, payments, and outstanding balance
+
+### Migration
+- `0009_customer_credit_phase2.py`
