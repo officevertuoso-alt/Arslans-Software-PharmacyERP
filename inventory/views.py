@@ -1738,32 +1738,62 @@ def _next_bill_number():
     return f'{prefix}{seq:04d}'
 
 
-def _pos_add_line(cart, product, qty=1):
+def _pos_add_line(cart, product, qty=1, mode='unit'):
+    """
+    qty is in base units if mode=unit, or packs if mode=pack.
+    product.price is price per pack (commercial pack).
+    Unit price = pack_price / units_per_pack for loose sales.
+    Stock quantity is always base units.
+    """
     from decimal import Decimal as D
     qty = int(qty)
     if qty < 1:
         qty = 1
+    upp = max(1, int(getattr(product, 'units_per_pack', 1) or 1))
+    if mode == 'pack':
+        base_qty = qty * upp
+        unit_price = D(str(product.price)).quantize(D('0.01'))  # price is per pack; line uses pack price * packs
+        # store line as packs for display? Keep base units in qty for stock, price as unit equivalent
+        # Simpler: cart qty always base units; price always per base unit
+        pack_price = D(str(product.price)).quantize(D('0.01'))
+        price = (pack_price / D(upp)).quantize(D('0.0001'))
+        display_mode = 'pack'
+        packs = qty
+    else:
+        base_qty = qty
+        pack_price = D(str(product.price)).quantize(D('0.01'))
+        price = (pack_price / D(upp)).quantize(D('0.0001')) if upp > 1 else pack_price
+        display_mode = 'loose' if upp > 1 else 'unit'
+        packs = 0
+        if not getattr(product, 'allow_loose', True) and upp > 1:
+            raise ValueError(f'{product.name} cannot be sold loose — sell full packs only.')
+
     if product.quantity < 1:
         raise ValueError(f'{product.name} is out of stock.')
     if product.is_expired():
         raise ValueError(f'{product.name} is expired.')
-    price = D(str(product.price)).quantize(D('0.01'))
+
     for line in cart:
         if line['product_id'] == product.id:
-            new_qty = int(line['qty']) + qty
+            new_qty = int(line['qty']) + base_qty
             if new_qty > product.quantity:
-                raise ValueError(f'Only {product.quantity} available for {product.name}.')
+                raise ValueError(
+                    f'Only {product.display_stock()} available for {product.name}.'
+                )
             line['qty'] = new_qty
-            line['line_total'] = str((price * new_qty).quantize(D('0.01')))
+            line['line_total'] = str((D(str(line['price'])) * D(new_qty)).quantize(D('0.01')))
             return cart
-    if qty > product.quantity:
-        raise ValueError(f'Only {product.quantity} available for {product.name}.')
+    if base_qty > product.quantity:
+        raise ValueError(f'Only {product.display_stock()} available for {product.name}.')
+    line_total = (price * D(base_qty)).quantize(D('0.01'))
     cart.append({
         'product_id': product.id,
         'name': product.name,
-        'price': str(price),
-        'qty': qty,
-        'line_total': str((price * qty).quantize(D('0.01'))),
+        'price': str(price.quantize(D('0.01'))),
+        'qty': base_qty,
+        'line_total': str(line_total),
+        'mode': display_mode,
+        'units_per_pack': upp,
     })
     return cart
 
@@ -1789,20 +1819,58 @@ def pos_search(request):
     q = (request.GET.get('q') or '').strip()
     if len(q) < 1:
         return JsonResponse({'results': []})
-    qs = Product.objects.filter(
-        djmodels.Q(name__icontains=q) | djmodels.Q(pk__iexact=q if q.isdigit() else None)
-    )
     if q.isdigit():
         qs = Product.objects.filter(
-            djmodels.Q(name__icontains=q) | djmodels.Q(pk=int(q))
+            djmodels.Q(name__icontains=q) | djmodels.Q(pk=int(q)) | djmodels.Q(barcode_number__icontains=q)
         )
     else:
-        qs = Product.objects.filter(name__icontains=q)
-    qs = qs.order_by('name')[:15]
-    return JsonResponse({'results': [
-        {'id': p.id, 'name': p.name, 'price': str(p.price), 'stock': p.quantity}
-        for p in qs if not p.is_expired()
-    ]})
+        qs = Product.objects.filter(
+            djmodels.Q(name__icontains=q) |
+            djmodels.Q(generic_name__icontains=q) |
+            djmodels.Q(barcode_number__icontains=q)
+        )
+    qs = qs.order_by('name')[:20]
+    results = []
+    for p in qs:
+        if p.is_expired():
+            continue
+        results.append({
+            'id': p.id,
+            'name': p.name,
+            'generic': p.generic_name or '',
+            'price': str(p.price),
+            'stock': p.quantity,
+            'stock_display': p.display_stock(),
+            'units_per_pack': p.units_per_pack or 1,
+            'allow_loose': p.allow_loose,
+        })
+    return JsonResponse({'results': results})
+
+
+@login_required
+def pos_alternates(request):
+    """Same generic_name alternates (Candela F4 style)."""
+    from django.http import JsonResponse
+    pid = request.GET.get('product_id')
+    try:
+        product = Product.objects.get(pk=int(pid))
+    except Exception:
+        return JsonResponse({'results': []})
+    if not product.generic_name:
+        return JsonResponse({'results': [], 'generic': ''})
+    alts = Product.objects.filter(generic_name__iexact=product.generic_name).exclude(pk=product.pk).order_by('name')[:15]
+    return JsonResponse({
+        'generic': product.generic_name,
+        'results': [
+            {
+                'id': p.id,
+                'name': p.name,
+                'price': str(p.price),
+                'stock_display': p.display_stock(),
+            }
+            for p in alts if not p.is_expired() and p.quantity > 0
+        ],
+    })
 
 
 @login_required
@@ -1831,12 +1899,17 @@ def pos_add(request):
     try:
         pid = int(request.POST.get('product_id'))
         qty = int(request.POST.get('qty') or 1)
+        mode = (request.POST.get('mode') or 'unit').strip()
+        if mode not in ('unit', 'pack', 'loose'):
+            mode = 'unit'
+        if mode == 'loose':
+            mode = 'unit'
     except (TypeError, ValueError):
         return JsonResponse({'error': 'Invalid product'})
     product = get_object_or_404(Product, pk=pid)
     cart = _pos_cart(request)
     try:
-        cart = _pos_add_line(cart, product, qty)
+        cart = _pos_add_line(cart, product, qty, mode=mode)
     except ValueError as e:
         return JsonResponse({'error': str(e)})
     _pos_save(request, cart)
