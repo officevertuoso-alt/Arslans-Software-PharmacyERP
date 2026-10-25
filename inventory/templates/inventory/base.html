@@ -32,6 +32,10 @@
                         <li class="nav-item"><a class="nav-link" href="{% url 'customer_ledger_list' %}">{% trans "Udhaar" %}</a></li>
                         <li class="nav-item"><a class="nav-link" href="{% url 'manage_returns' %}">{% trans "Returns" %}</a></li>
                         <li class="nav-item"><a class="nav-link" href="{% url 'reports_dashboard' %}">{% trans "Reports" %}</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{% url 'notifications_list' %}">🔔 Alerts</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{% url 'cashbook_list' %}">Cashbook</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{% url 'charts_dashboard' %}">Charts</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{% url 'medicine_master_list' %}">Master</a></li>
                       {% endif %}
                     {% endif %}
                 </ul>
@@ -72,5 +76,25 @@
       {% trans "Arslan's Software — Pharmacy ERP" %} · Pakistan · PKR
     </footer>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+(function(){
+  if (!window.Notification || !document.querySelector('.navbar')) return;
+  function ask(){ if(Notification.permission==='default') Notification.requestPermission(); }
+  ask();
+  function poll(){
+    fetch('/api/notifications/').then(r=>r.json()).then(d=>{
+      if(!d.count) return;
+      d.items.slice(0,3).forEach(it=>{
+        if(Notification.permission==='granted'){
+          try { new Notification(it.title, { body: it.message, tag: 'n'+it.id }); } catch(e){}
+        }
+      });
+    }).catch(()=>{});
+  }
+  setTimeout(poll, 3000);
+  setInterval(poll, 120000);
+})();
+</script>
 </body>
 </html>
