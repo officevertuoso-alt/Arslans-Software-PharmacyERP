@@ -395,18 +395,110 @@ def manage_returns(request):
 
 @admin_required
 def process_return(request, pk, status):
-    return_request = get_object_or_404(Return, pk=pk)
-    if status in ["Approved", "Rejected"]:
-        return_request.status = status
-        if status == "Approved":
-            product = return_request.product
-            product.quantity += return_request.quantity
-            product.save()
-        return_request.save()
-        messages.success(request, f"Return request {status.lower()}.")
-    else:
+    """
+    Approve/reject a return with full accounting:
+    - restock to a RETURN batch (or existing nearest batch)
+    - cash refund or credit to customer udhaar balance
+    - link processed_by / processed_at
+    """
+    if status not in ["Approved", "Rejected"]:
         messages.error(request, "Invalid status.")
+        return redirect('manage_returns')
+
+    # Optional override from POST when approving from enhanced form
+    if request.method == 'POST' and status == "Approved":
+        refund_method = request.POST.get('refund_method', 'cash')
+        restock = request.POST.get('restock', '1') == '1'
+        try:
+            refund_amount = Decimal(str(request.POST.get('refund_amount', '0') or '0')).quantize(Decimal('0.01'))
+        except (InvalidOperation, TypeError, ValueError):
+            refund_amount = None
+    else:
+        refund_method = None
+        restock = True
+        refund_amount = None
+
+    try:
+        with transaction.atomic():
+            ret = Return.objects.select_for_update().select_related('product', 'customer', 'sale').get(pk=pk)
+            if ret.status != "Pending":
+                messages.error(request, "This return has already been processed.")
+                return redirect('manage_returns')
+
+            ret.status = status
+            ret.processed_at = timezone.now()
+            ret.processed_by = request.user
+
+            if status == "Approved":
+                if refund_method:
+                    ret.refund_method = refund_method if refund_method in ('cash', 'credit', 'none') else 'cash'
+                ret.restock = restock
+
+                if refund_amount is None:
+                    refund_amount = ret.suggested_refund()
+                if ret.refund_method == Return.REFUND_NONE:
+                    refund_amount = Decimal('0.00')
+                ret.refund_amount = refund_amount
+
+                # Restock
+                if ret.restock and ret.quantity > 0:
+                    product = Product.objects.select_for_update().get(pk=ret.product_id)
+                    batch_number = f"RET-{ret.id}-{timezone.now().strftime('%Y%m%d')}"
+                    # Prefer put back into a non-expired batch of same product if exists
+                    today = timezone.now().date()
+                    batch = (
+                        product.batches.select_for_update()
+                        .filter(is_active=True, expiry_date__gte=today)
+                        .order_by('expiry_date')
+                        .first()
+                    )
+                    if batch:
+                        batch.quantity += ret.quantity
+                        batch.save(update_fields=['quantity'])
+                    else:
+                        # Create a return batch; expiry from product or +1 year
+                        from datetime import timedelta
+                        exp = product.expiry_date if product.expiry_date >= today else today + timedelta(days=365)
+                        batch = ProductBatch.objects.create(
+                            product=product,
+                            batch_number=batch_number,
+                            quantity=ret.quantity,
+                            expiry_date=exp,
+                            purchase_cost=Decimal('0.00'),
+                            notes=f'Restock from return #{ret.id}',
+                            is_active=True,
+                        )
+                    product.quantity = product.total_batch_quantity()
+                    # fallback if no batches sum
+                    if product.quantity == 0 and not product.batches.exists():
+                        product.quantity = ret.quantity
+                    elif product.batches.exists():
+                        product.quantity = product.total_batch_quantity()
+                    else:
+                        product.quantity += ret.quantity
+                    product.save(update_fields=['quantity'])
+
+                # Monetary refund
+                if ret.refund_amount > 0 and ret.refund_method == Return.REFUND_CREDIT:
+                    profile, _ = CustomerProfile.objects.select_for_update().get_or_create(user=ret.customer)
+                    # Crediting udhaar = reduce what customer owes
+                    profile.balance = (profile.balance - ret.refund_amount).quantize(Decimal('0.01'))
+                    profile.save(update_fields=['balance', 'updated_at'])
+                # cash refund is recorded on the return; actual cash drawer is operational
+
+            ret.save()
+        messages.success(
+            request,
+            f"Return {status.lower()}."
+            + (f" Refund {CURRENCY_SYMBOL}{ret.refund_amount} via {ret.get_refund_method_display()}."
+               if status == "Approved" else "")
+        )
+    except Exception as e:
+        messages.error(request, f"Could not process return: {e}")
     return redirect('manage_returns')
+
+
+
 
 def view_barcode(request, pk):
     product = get_object_or_404(Product, pk=pk)
