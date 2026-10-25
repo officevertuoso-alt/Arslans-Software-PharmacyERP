@@ -90,4 +90,7 @@ urlpatterns = [
     path('pos/recall/<int:idx>/', views.pos_recall, name='pos_recall'),
     path('receipt/<str:bill_number>/', views.receipt_view, name='receipt_view'),
     path('stock-adjust/', views.stock_adjust, name='stock_adjust'),
+
+    path('shift/open/', views.shift_open, name='shift_open'),
+    path('shift/close/', views.shift_close, name='shift_close'),
 ]
