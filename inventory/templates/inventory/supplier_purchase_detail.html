@@ -1,0 +1,39 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Purchase {{ purchase.invoice_number }}{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h2>Invoice {{ purchase.invoice_number }}</h2>
+  <p>
+    <strong>Supplier:</strong> {{ purchase.supplier.name }} &nbsp;|&nbsp;
+    <strong>Date:</strong> {{ purchase.invoice_date }} &nbsp;|&nbsp;
+    <strong>Status:</strong> {{ purchase.get_status_display }}
+  </p>
+  <div class="table-responsive mb-3">
+  <table class="table table-sm table-bordered">
+    <thead><tr><th>Product</th><th>Batch</th><th>Qty</th><th>Unit cost</th><th>Expiry</th><th>Line total</th></tr></thead>
+    <tbody>
+    {% for line in purchase.lines.all %}
+      <tr>
+        <td>{{ line.product.name }}</td>
+        <td>{{ line.batch_number }}</td>
+        <td>{{ line.quantity }}</td>
+        <td>{{ currency }}{{ line.unit_cost|floatformat:2 }}</td>
+        <td>{{ line.expiry_date }}</td>
+        <td>{{ currency }}{{ line.line_total|floatformat:2 }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p>
+    Subtotal: {{ currency }}{{ purchase.subtotal|floatformat:2 }} &nbsp;|&nbsp;
+    Tax: {{ currency }}{{ purchase.tax|floatformat:2 }} &nbsp;|&nbsp;
+    <strong>Total: {{ currency }}{{ purchase.total|floatformat:2 }}</strong> &nbsp;|&nbsp;
+    Paid: {{ currency }}{{ purchase.amount_paid|floatformat:2 }} &nbsp;|&nbsp;
+    Due: {{ currency }}{{ purchase.amount_due|floatformat:2 }}
+  </p>
+  {% if purchase.notes %}<p class="text-muted">{{ purchase.notes }}</p>{% endif %}
+  <a class="btn btn-secondary" href="{% url 'supplier_purchase_list' %}">Back</a>
+  <a class="btn btn-primary" href="{% url 'supplier_pay' purchase.supplier.id %}">Pay supplier</a>
+</div>
+{% endblock %}
