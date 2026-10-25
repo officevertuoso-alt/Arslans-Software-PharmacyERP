@@ -309,3 +309,13 @@ If you add more strings, run on a machine with gettext:
 - MessageLog, `/messaging/` test + due reminders
 - POS optional send bill SMS/WhatsApp
 - `.env.example` messaging keys
+
+
+## [Phase 15] — 2026-10-26 — Backup scheduler, restore, reset, themes, GUI
+
+- Local SQLite backup to `backups/` + auto schedule (interval hours)
+- Restore with pre-restore safety copy
+- Factory reset (superuser) for transactional data
+- Themes: light / dark / pharmacy green
+- Context processor + modern navbar/cards CSS
+- `/system/` tools page
