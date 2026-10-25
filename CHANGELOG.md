@@ -301,3 +301,11 @@ If you add more strings, run on a machine with gettext:
 
 ### Still not full Candela
 - FBR live API, multi-branch godown, SMS gateway, native offline installer
+
+
+## [Phase 14] — 2026-10-26 — SMS / WhatsApp gateway
+
+- `inventory/messaging.py`: console | http | twilio
+- MessageLog, `/messaging/` test + due reminders
+- POS optional send bill SMS/WhatsApp
+- `.env.example` messaging keys
