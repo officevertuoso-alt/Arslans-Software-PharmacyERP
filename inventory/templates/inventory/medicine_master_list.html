@@ -5,7 +5,8 @@
   <div class="d-flex justify-content-between mb-3">
     <h2>Medicine master catalog <small class="text-muted">({{ total_catalog }} rows — not stock)</small></h2>
     <div>
-      <a class="btn btn-success" href="{% url 'medicine_master_import' %}">Bulk import</a>
+      <a class="btn btn-success" href="{% url 'preload_medicines_ui' %}">Preload Pakistan list</a>
+      <a class="btn btn-outline-success" href="{% url 'medicine_master_import' %}">Bulk import</a>
       <a class="btn btn-outline-primary" href="{% url 'medicine_master_export' %}">Export CSV</a>
     </div>
   </div>
