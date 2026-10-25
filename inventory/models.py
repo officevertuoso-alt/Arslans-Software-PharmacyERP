@@ -66,6 +66,104 @@ class Product(models.Model):
             self.barcode.save(f'{self.id}.png', File(buffer), save=False)
         super().save(*args, **kwargs)
 
+    def total_batch_quantity(self):
+        """Sum of non-expired active batch quantities."""
+        today = timezone.now().date()
+        return (
+            self.batches.filter(is_active=True, expiry_date__gte=today)
+            .aggregate(total=models.Sum('quantity'))['total'] or 0
+        )
+
+    def sync_quantity_from_batches(self):
+        """Keep Product.quantity in sync with sum of active non-expired batches."""
+        total = self.total_batch_quantity()
+        if self.quantity != total:
+            self.quantity = total
+            self.save(update_fields=['quantity'])
+        return total
+
+    def allocate_fefo(self, qty_needed):
+        """
+        Allocate qty_needed from batches in FEFO order (earliest expiry first).
+        Returns list of (batch, qty) without saving. Raises ValueError if insufficient.
+        Caller must save inside a transaction with select_for_update.
+        """
+        qty_needed = int(qty_needed)
+        if qty_needed <= 0:
+            raise ValueError('Quantity must be positive.')
+        today = timezone.now().date()
+        batches = list(
+            self.batches.select_for_update()
+            .filter(is_active=True, quantity__gt=0, expiry_date__gte=today)
+            .order_by('expiry_date', 'id')
+        )
+        remaining = qty_needed
+        plan = []
+        for b in batches:
+            if remaining <= 0:
+                break
+            take = min(b.quantity, remaining)
+            if take > 0:
+                plan.append((b, take))
+                remaining -= take
+        if remaining > 0:
+            available = qty_needed - remaining
+            raise ValueError(
+                f'Not enough sellable (non-expired) stock for {self.name}. '
+                f'Requested {qty_needed}, available {available}.'
+            )
+        return plan
+
+
+
+
+class ProductBatch(models.Model):
+    """
+    One physical batch/lot of a product.
+    Sales use FEFO: earliest expiry_date first.
+    """
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='batches')
+    batch_number = models.CharField(max_length=64, help_text='Lot / batch number from supplier')
+    quantity = models.PositiveIntegerField(default=0)
+    expiry_date = models.DateField()
+    purchase_cost = models.DecimalField(
+        max_digits=10, decimal_places=2, default=Decimal('0.00'),
+        help_text='Cost per unit (Rs.) for this batch'
+    )
+    supplier = models.ForeignKey(
+        Supplier, on_delete=models.SET_NULL, null=True, blank=True, related_name='batches'
+    )
+    received_date = models.DateField(auto_now_add=True)
+    notes = models.CharField(max_length=255, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ['expiry_date', 'id']  # FEFO order
+        verbose_name = 'Product Batch'
+        verbose_name_plural = 'Product Batches'
+        unique_together = [('product', 'batch_number')]
+
+    def __str__(self):
+        return f"{self.product.name} [{self.batch_number}] exp {self.expiry_date} qty {self.quantity}"
+
+    @property
+    def is_expired(self):
+        return timezone.now().date() > self.expiry_date
+
+    @property
+    def days_until_expiry(self):
+        return (self.expiry_date - timezone.now().date()).days
+
+
+class SaleBatchAllocation(models.Model):
+    """Tracks which batches were used for a sale (FEFO audit trail)."""
+    sale = models.ForeignKey('Purchase', on_delete=models.CASCADE, related_name='batch_allocations')
+    batch = models.ForeignKey(ProductBatch, on_delete=models.PROTECT, related_name='sale_allocations')
+    quantity = models.PositiveIntegerField()
+
+    def __str__(self):
+        return f"Sale#{self.sale_id} ← {self.quantity} from batch {self.batch.batch_number}"
+
 
 class CustomerProfile(models.Model):
     """Pharmacy customer profile for credit (udhaar) tracking.
