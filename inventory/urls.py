@@ -72,4 +72,6 @@ urlpatterns = [
     path('notifications/', views.notifications_list, name='notifications_list'),
     path('api/notifications/', views.notifications_poll, name='notifications_poll'),
     path('notifications/refresh/', views.refresh_alerts, name='refresh_alerts'),
+
+    path('api/customer-suggest/', views.customer_suggest, name='customer_suggest'),
 ]
