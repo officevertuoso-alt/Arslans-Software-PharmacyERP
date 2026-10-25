@@ -1670,6 +1670,375 @@ def customer_suggest(request):
         results.append({'id': u.id, 'username': u.username, 'balance': bal, 'phone': phone})
     return JsonResponse({'results': results})
 
+
+# ─── Fast POS (Candela / Abuzar style) ───────────────────────────────────────
+
+def _pos_cart(request):
+    return request.session.get('pos_cart', [])
+
+
+def _pos_save(request, cart):
+    request.session['pos_cart'] = cart
+    request.session.modified = True
+
+
+def _pos_totals(cart):
+    from decimal import Decimal as D
+    total = D('0.00')
+    count = 0
+    for line in cart:
+        total += D(str(line.get('line_total', 0)))
+        count += int(line.get('qty', 0))
+    return count, total.quantize(D('0.01'))
+
+
+def _pos_json(cart):
+    count, total = _pos_totals(cart)
+    return {
+        'cart': cart,
+        'count': count,
+        'total': str(total),
+    }
+
+
+def _pos_find_product(code):
+    """Resolve barcode / id / name to a Product."""
+    code = (code or '').strip()
+    if not code:
+        return None
+    # numeric id
+    if code.isdigit():
+        pid = int(code)
+        # also try EAN-style trailing id
+        p = Product.objects.filter(pk=pid).first()
+        if p:
+            return p
+        # strip leading zeros from 13-digit style
+        try:
+            p = Product.objects.filter(pk=int(code[-6:] or '0')).first()
+            if p:
+                return p
+        except Exception:
+            pass
+    # exact name
+    p = Product.objects.filter(name__iexact=code).first()
+    if p:
+        return p
+    # startswith
+    return Product.objects.filter(name__istartswith=code).order_by('name').first()
+
+
+def _pos_add_line(cart, product, qty=1):
+    from decimal import Decimal as D
+    qty = int(qty)
+    if qty < 1:
+        qty = 1
+    if product.quantity < 1:
+        raise ValueError(f'{product.name} is out of stock.')
+    if product.is_expired():
+        raise ValueError(f'{product.name} is expired.')
+    price = D(str(product.price)).quantize(D('0.01'))
+    for line in cart:
+        if line['product_id'] == product.id:
+            new_qty = int(line['qty']) + qty
+            if new_qty > product.quantity:
+                raise ValueError(f'Only {product.quantity} available for {product.name}.')
+            line['qty'] = new_qty
+            line['line_total'] = str((price * new_qty).quantize(D('0.01')))
+            return cart
+    if qty > product.quantity:
+        raise ValueError(f'Only {product.quantity} available for {product.name}.')
+    cart.append({
+        'product_id': product.id,
+        'name': product.name,
+        'price': str(price),
+        'qty': qty,
+        'line_total': str((price * qty).quantize(D('0.01'))),
+    })
+    return cart
+
+
+@login_required
+def pos_screen(request):
+    cart = _pos_cart(request)
+    count, total = _pos_totals(cart)
+    return render(request, 'inventory/pos.html', {
+        'cart': cart,
+        'cart_count': count,
+        'cart_total': total,
+        'currency': CURRENCY_SYMBOL,
+    })
+
+
+@login_required
+def pos_search(request):
+    from django.http import JsonResponse
+    from django.db import models as djmodels
+    q = (request.GET.get('q') or '').strip()
+    if len(q) < 1:
+        return JsonResponse({'results': []})
+    qs = Product.objects.filter(
+        djmodels.Q(name__icontains=q) | djmodels.Q(pk__iexact=q if q.isdigit() else None)
+    )
+    if q.isdigit():
+        qs = Product.objects.filter(
+            djmodels.Q(name__icontains=q) | djmodels.Q(pk=int(q))
+        )
+    else:
+        qs = Product.objects.filter(name__icontains=q)
+    qs = qs.order_by('name')[:15]
+    return JsonResponse({'results': [
+        {'id': p.id, 'name': p.name, 'price': str(p.price), 'stock': p.quantity}
+        for p in qs if not p.is_expired()
+    ]})
+
+
+@login_required
+def pos_scan(request):
+    from django.http import JsonResponse
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST only'}, status=405)
+    code = request.POST.get('code', '')
+    product = _pos_find_product(code)
+    if not product:
+        return JsonResponse({'error': f'Product not found: {code}'})
+    cart = _pos_cart(request)
+    try:
+        cart = _pos_add_line(cart, product, 1)
+    except ValueError as e:
+        return JsonResponse({'error': str(e)})
+    _pos_save(request, cart)
+    return JsonResponse(_pos_json(cart))
+
+
+@login_required
+def pos_add(request):
+    from django.http import JsonResponse
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST only'}, status=405)
+    try:
+        pid = int(request.POST.get('product_id'))
+        qty = int(request.POST.get('qty') or 1)
+    except (TypeError, ValueError):
+        return JsonResponse({'error': 'Invalid product'})
+    product = get_object_or_404(Product, pk=pid)
+    cart = _pos_cart(request)
+    try:
+        cart = _pos_add_line(cart, product, qty)
+    except ValueError as e:
+        return JsonResponse({'error': str(e)})
+    _pos_save(request, cart)
+    return JsonResponse(_pos_json(cart))
+
+
+@login_required
+def pos_qty(request):
+    from django.http import JsonResponse
+    from decimal import Decimal as D
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST only'}, status=405)
+    try:
+        pid = int(request.POST.get('product_id'))
+        delta = int(request.POST.get('delta') or 0)
+    except (TypeError, ValueError):
+        return JsonResponse({'error': 'Invalid'})
+    cart = _pos_cart(request)
+    product = Product.objects.filter(pk=pid).first()
+    new_cart = []
+    for line in cart:
+        if line['product_id'] == pid:
+            q = int(line['qty']) + delta
+            if q <= 0:
+                continue
+            if product and q > product.quantity:
+                return JsonResponse({'error': f'Only {product.quantity} in stock'})
+            price = D(str(line['price']))
+            line = dict(line)
+            line['qty'] = q
+            line['line_total'] = str((price * q).quantize(D('0.01')))
+        new_cart.append(line)
+    _pos_save(request, new_cart)
+    return JsonResponse(_pos_json(new_cart))
+
+
+@login_required
+def pos_remove(request):
+    from django.http import JsonResponse
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST only'}, status=405)
+    try:
+        pid = int(request.POST.get('product_id'))
+    except (TypeError, ValueError):
+        return JsonResponse({'error': 'Invalid'})
+    cart = [l for l in _pos_cart(request) if l['product_id'] != pid]
+    _pos_save(request, cart)
+    return JsonResponse(_pos_json(cart))
+
+
+@login_required
+def pos_clear(request):
+    _pos_save(request, [])
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        from django.http import JsonResponse
+        return JsonResponse(_pos_json([]))
+    return redirect('pos_screen')
+
+
+@login_required
+def pos_pay(request):
+    """
+    Multi-line POS checkout: FEFO stock, sales, cashbook, credit/due — one atomic txn.
+    """
+    cart = _pos_cart(request)
+    if not cart:
+        messages.error(request, "Cart is empty.")
+        return redirect('pos_screen')
+
+    count, bill_total = _pos_totals(cart)
+    profile, _ = CustomerProfile.objects.get_or_create(user=request.user)
+
+    try:
+        payment_amount = Decimal(str(request.POST.get('payment_amount', '0') or '0')).quantize(Decimal('0.01'))
+    except (InvalidOperation, TypeError, ValueError):
+        messages.error(request, "Invalid payment amount.")
+        return redirect('pos_screen')
+
+    if payment_amount < 0:
+        messages.error(request, "Payment cannot be negative.")
+        return redirect('pos_screen')
+
+    credit_needed = (bill_total - payment_amount).quantize(Decimal('0.01'))
+    if credit_needed < 0:
+        credit_needed = Decimal('0.00')
+        amount_paid = bill_total
+    else:
+        amount_paid = payment_amount
+
+    if credit_needed > 0 and not profile.can_take_credit(credit_needed):
+        messages.error(request, f"Credit limit exceeded. Available: {CURRENCY_SYMBOL}{profile.available_credit}.")
+        return redirect('pos_screen')
+
+    if credit_needed > 0:
+        phone = (request.POST.get('customer_phone') or '').strip()
+        due_raw = (request.POST.get('due_date') or '').strip()
+        if not phone or not due_raw:
+            messages.error(request, "Phone and due date required for partial/credit payment.")
+            return redirect('pos_screen')
+        try:
+            due_date = date.fromisoformat(due_raw)
+        except ValueError:
+            messages.error(request, "Invalid due date.")
+            return redirect('pos_screen')
+    else:
+        phone = due_date = None
+
+    if credit_needed == 0:
+        payment_method = Purchase.PAYMENT_CASH
+    elif amount_paid == 0:
+        payment_method = Purchase.PAYMENT_CREDIT
+    else:
+        payment_method = Purchase.PAYMENT_SPLIT
+
+    try:
+        with transaction.atomic():
+            last_sale = None
+            for line in cart:
+                product = Product.objects.select_for_update().get(pk=line['product_id'])
+                qty = int(line['qty'])
+                line_total = Decimal(str(line['line_total'])).quantize(Decimal('0.01'))
+                unit = (line_total / Decimal(qty)).quantize(Decimal('0.01')) if qty else line_total
+
+                # proportional paid/credit for this line
+                if bill_total > 0:
+                    share = line_total / bill_total
+                    line_paid = (amount_paid * share).quantize(Decimal('0.01'))
+                    line_credit = (line_total - line_paid).quantize(Decimal('0.01'))
+                    if line_credit < 0:
+                        line_credit = Decimal('0.00')
+                        line_paid = line_total
+                else:
+                    line_paid = line_credit = Decimal('0.00')
+
+                has_batches = product.batches.filter(is_active=True, quantity__gt=0).exists()
+                plan = []
+                if has_batches:
+                    plan = product.allocate_fefo(qty)
+                    for batch, take in plan:
+                        batch.quantity -= take
+                        if batch.quantity == 0:
+                            batch.is_active = False
+                        batch.save(update_fields=['quantity', 'is_active'])
+                    product.sync_quantity_from_batches()
+                else:
+                    if product.quantity < qty:
+                        raise ValueError(f'Not enough {product.name}. Available {product.quantity}.')
+                    if product.is_expired():
+                        raise ValueError(f'{product.name} is expired.')
+                    product.quantity -= qty
+                    product.save(update_fields=['quantity'])
+
+                sale = Purchase.objects.create(
+                    product=product,
+                    customer=request.user,
+                    quantity=qty,
+                    total_price=line_total,
+                    amount_paid=line_paid,
+                    amount_on_credit=line_credit,
+                    payment_method=payment_method,
+                    notes='POS multi-item',
+                )
+                last_sale = sale
+                for batch, take in plan:
+                    SaleBatchAllocation.objects.create(sale=sale, batch=batch, quantity=take)
+
+                if line_paid > 0:
+                    post_cashbook(
+                        entry_type=CashbookEntry.TYPE_SALE,
+                        amount=line_paid,
+                        user=request.user,
+                        description=f'POS {product.name} x{qty}',
+                        reference=str(sale.id),
+                        customer=request.user,
+                    )
+
+            if credit_needed > 0:
+                profile = CustomerProfile.objects.select_for_update().get(user=request.user)
+                profile.balance = (profile.balance + credit_needed).quantize(Decimal('0.01'))
+                if phone:
+                    profile.phone = phone
+                profile.save()
+                post_cashbook(
+                    entry_type=CashbookEntry.TYPE_CREDIT_GIVEN,
+                    amount=Decimal('0.00'),
+                    user=request.user,
+                    description=f'POS udhaar Rs.{credit_needed}',
+                    customer=request.user,
+                )
+                CreditDue.objects.create(
+                    customer=request.user,
+                    sale=last_sale,
+                    amount=credit_needed,
+                    due_date=due_date,
+                    phone=phone or '',
+                    notes='POS bill',
+                )
+
+        _pos_save(request, [])
+        messages.success(
+            request,
+            f"POS sale complete. Bill {CURRENCY_SYMBOL}{bill_total}. "
+            f"Paid {CURRENCY_SYMBOL}{amount_paid}"
+            + (f", credit {CURRENCY_SYMBOL}{credit_needed}" if credit_needed else "")
+            + "."
+        )
+        return redirect('pos_screen')
+    except ValueError as e:
+        messages.error(request, str(e))
+        return redirect('pos_screen')
+    except Exception as e:
+        messages.error(request, f"Sale failed: {e}")
+        return redirect('pos_screen')
+
 def custom_404(request, exception=None):
     return render(request, 'inventory/404.html', status=404)
 
