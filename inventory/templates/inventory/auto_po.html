@@ -1,0 +1,12 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Auto PO{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h2>Auto purchase order from low stock</h2>
+  <p>{{ low|length }} low-stock products</p>
+  <ul>{% for p in low %}<li>{{ p.name }} — qty {{ p.quantity }} (threshold {{ p.low_stock_threshold }})</li>{% empty %}<li>None</li>{% endfor %}</ul>
+  {% if low %}
+  <form method="post">{% csrf_token %}<button class="btn btn-success">Create draft PO</button></form>
+  {% endif %}
+</div>
+{% endblock %}
