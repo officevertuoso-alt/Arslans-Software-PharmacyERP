@@ -109,4 +109,6 @@ urlpatterns = [
     path('audit/', views.audit_log_list, name='audit_log_list'),
 
     path('messaging/', views.messaging_center, name='messaging_center'),
+
+    path('system/', views.system_tools, name='system_tools'),
 ]
