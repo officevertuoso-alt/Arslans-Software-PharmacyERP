@@ -114,3 +114,23 @@
 
 ### Migration
 - `0012_return_accounting.py`
+
+
+## [Phase 6] — 2026-10-26 — Reports & Backup/Restore
+
+### Reports dashboard (`/reports/`)
+- Sales today (cash vs credit), 7-day revenue
+- Estimated COGS and gross profit from batch costs
+- Stock valuation (sell price + cost)
+- Customer receivables and supplier payables
+- Low/expiring/expired counts
+
+### Daily closing (`/reports/daily-closing/`)
+- Per-day sales, cash in, new udhaar, collections, supplier payments, refunds, net cash
+
+### Backup / Restore
+- `/backup/` — SQLite online backup download
+- `/restore/` — upload backup with automatic safety copy + integrity check
+- Files stored under `backups/` (gitignored)
+
+No new DB migration required for Phase 6.
