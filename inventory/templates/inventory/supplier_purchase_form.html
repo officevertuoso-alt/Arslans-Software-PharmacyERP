@@ -70,5 +70,14 @@ function addLine(){
   row.querySelectorAll('select').forEach(s => s.selectedIndex=0);
   document.getElementById('lines').appendChild(row);
 }
+
+// Master catalog suggest for product name typing
+document.querySelectorAll('select[name="product_id"]').forEach(sel => {
+  // keep select; add helper input above first line
+});
+const help = document.createElement('p');
+help.className = 'text-muted small';
+help.innerHTML = 'Tip: open <a href="/medicine-master/">Medicine Master</a> to import catalog. Create Product SKUs from catalog names, then select here. Stock only increases after this receive.';
+document.getElementById('purchase-form').prepend(help);
 </script>
 {% endblock %}
