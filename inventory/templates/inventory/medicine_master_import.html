@@ -1,0 +1,14 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Import Medicine Master{% endblock %}
+{% block content %}
+<div class="container py-3" style="max-width:640px">
+  <h2>Bulk import medicine catalog</h2>
+  <p class="text-muted">CSV or XLSX. This does <strong>not</strong> add stock — only purchase suggestions. Use your Pakistan Medicine Master List file.</p>
+  <form method="post" enctype="multipart/form-data" class="card card-body">
+    {% csrf_token %}
+    <input type="file" name="file" accept=".csv,.xlsx,.xls" class="form-control mb-3" required>
+    <button class="btn btn-success">Import</button>
+    <a href="{% url 'medicine_master_list' %}" class="btn btn-secondary">Cancel</a>
+  </form>
+</div>
+{% endblock %}
