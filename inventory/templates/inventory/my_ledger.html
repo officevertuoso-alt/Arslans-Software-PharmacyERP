@@ -1,0 +1,56 @@
+{% extends 'inventory/base.html' %}
+{% block title %}My Ledger - Arslan's Software{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h2>My Account / Ledger</h2>
+  <div class="alert alert-secondary">
+    <strong>Outstanding balance (udhaar):</strong> {{ currency }}{{ profile.balance|floatformat:2 }}
+    &nbsp;|&nbsp;
+    <strong>Credit limit:</strong> {{ currency }}{{ profile.credit_limit|floatformat:2 }}
+    &nbsp;|&nbsp;
+    <strong>Available:</strong> {{ currency }}{{ profile.available_credit|floatformat:2 }}
+  </div>
+
+  <h4 class="mt-4">Recent sales</h4>
+  <div class="table-responsive">
+  <table class="table table-sm table-striped">
+    <thead><tr><th>Date</th><th>Product</th><th>Qty</th><th>Total</th><th>Paid</th><th>On credit</th><th>Method</th></tr></thead>
+    <tbody>
+    {% for s in sales %}
+      <tr>
+        <td>{{ s.purchase_date|date:"Y-m-d H:i" }}</td>
+        <td>{{ s.product.name }}</td>
+        <td>{{ s.quantity }}</td>
+        <td>{{ currency }}{{ s.total_price|floatformat:2 }}</td>
+        <td>{{ currency }}{{ s.amount_paid|floatformat:2 }}</td>
+        <td>{{ currency }}{{ s.amount_on_credit|floatformat:2 }}</td>
+        <td>{{ s.get_payment_method_display }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="7">No sales yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+
+  <h4 class="mt-4">Payments received</h4>
+  <div class="table-responsive">
+  <table class="table table-sm table-striped">
+    <thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Notes</th></tr></thead>
+    <tbody>
+    {% for p in payments %}
+      <tr>
+        <td>{{ p.created_at|date:"Y-m-d H:i" }}</td>
+        <td>{{ currency }}{{ p.amount|floatformat:2 }}</td>
+        <td>{{ p.get_payment_method_display }}</td>
+        <td>{{ p.notes }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="4">No payments recorded.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <a href="{% url 'customer_product_list' %}" class="btn btn-secondary mt-3">Back to shop</a>
+</div>
+{% endblock %}
