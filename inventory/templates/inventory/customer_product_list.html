@@ -43,7 +43,7 @@
                 <div class="product-card-body">
                     <h3 class="product-name">{{ product.name }}</h3>
                     <p class="product-category">{{ product.category }}</p>
-                    <p class="product-price">₱{{ product.price|floatformat:2 }}</p>
+                    <p class="product-price">Rs.{{ product.price|floatformat:2 }}</p>
                     <p>
                         Expiry: {{ product.expiry_date }}
                         {% if product.expiry_date < today %}
