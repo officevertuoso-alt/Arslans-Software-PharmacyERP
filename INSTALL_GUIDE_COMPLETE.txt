@@ -1,0 +1,265 @@
+================================================================================
+  ARSLAN'S SOFTWARE — PHARMACY ERP
+  COMPLETE INSTALLATION GUIDE (Windows)
+  Urdu + English | Offline / USB / CMD
+================================================================================
+  Project : https://github.com/officevertuoso-alt/Arslans-Software-PharmacyERP
+  Local URL after start : http://127.0.0.1:8000/
+================================================================================
+
+PART 0 — QUICK SUMMARY (3 FILES)
+--------------------------------
+  1) INSTALL_PHARMACY.bat     = one-time install
+  2) windows\CREATE_ADMIN.bat = create login user (one-time)
+  3) START_PHARMACY.bat       = start every day
+
+  Agar bat files kaam na karein to neeche CMD commands use karein.
+
+
+PART 1 — PYTHON OFFLINE (MOBILE DOWNLOAD + USB)
+-----------------------------------------------
+PC par internet nahi hai to mobile se download karein.
+
+A) Phone browser mein yeh link kholen (64-bit Windows FULL installer):
+
+   https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe
+
+   Agar 404 aaye to list se naya version lein:
+   https://www.python.org/ftp/python/
+   https://www.python.org/downloads/windows/
+
+   File name aisa hona chahiye:  python-3.12.x-amd64.exe
+   (WEB-BASED installer mat lo — usay net chahiye)
+
+B) Project ZIP phone par:
+
+   https://github.com/officevertuoso-alt/Arslans-Software-PharmacyERP/archive/refs/heads/main.zip
+
+C) USB data cable se phone ko PC se jodain
+   - Phone: File transfer / MTP mode
+   - Copy files to PC, example:
+
+     D:\Setup\python-3.12.10-amd64.exe
+     D:\Setup\Arslans-Software-PharmacyERP-main.zip
+
+D) ZIP extract karein:
+
+     D:\ArslansPharmacy
+
+   Is folder ke andar manage.py aur windows folder hona chahiye.
+
+
+PART 2 — INSTALL PYTHON ON PC (NO INTERNET NEEDED)
+--------------------------------------------------
+1) python-3.12.x-amd64.exe double-click
+2) CHECK: "Add python.exe to PATH"
+3) Install Now → Close
+
+4) CMD kholen (Win+R → cmd → Enter) aur check:
+
+   python --version
+
+   Example: Python 3.12.10
+
+Agar "python is not recognized":
+  - Naya CMD kholen
+  - Ya PC restart
+  - Ya Python dubara install karein with PATH checked
+
+
+PART 3 — INSTALL PROJECT (CMD)
+------------------------------
+CMD mein yeh commands ek ek karke chalaein.
+Path apna folder rakhein (yahan D:\ArslansPharmacy hai).
+
+   cd /d D:\ArslansPharmacy
+
+   python -m venv .venv
+
+   .venv\Scripts\activate.bat
+
+   python -m pip install --upgrade pip wheel
+
+   python -m pip install -r requirements.txt
+
+   python manage.py migrate --noinput
+
+NOTE:
+  pip install ke liye PC ko INTERNET chahiye (ya mobile hotspot 1–2 minute).
+  Python installer offline hai; Django packages online download hoti hain
+  jab tak aap pehle se wheel files na laein.
+
+OR double-click:
+
+   D:\ArslansPharmacy\INSTALL_PHARMACY.bat
+
+
+PART 4 — CREATE ADMIN LOGIN (CMD)
+---------------------------------
+   cd /d D:\ArslansPharmacy
+   .venv\Scripts\activate.bat
+   python manage.py createsuperuser
+
+Username: admin
+Email: (Enter khali)
+Password: (apna strong password — do dafa)
+
+OR double-click:
+
+   windows\CREATE_ADMIN.bat
+
+
+PART 5 — START SOFTWARE EVERY DAY (CMD)
+---------------------------------------
+   cd /d D:\ArslansPharmacy
+   .venv\Scripts\activate.bat
+   python manage.py migrate --noinput
+   python -c "from waitress import serve; from stocktime.wsgi import application; serve(application, host='127.0.0.1', port=8000, threads=8)"
+
+Phir browser:
+
+   http://127.0.0.1:8000/
+
+Login: admin + password
+
+OR double-click:
+
+   START_PHARMACY.bat
+
+Band karna:
+   Server window mein Ctrl+C
+   Ya: windows\STOP.bat
+
+
+PART 6 — MOBILE SE USE (SAME WIFI)
+----------------------------------
+PC aur phone SAME Wi-Fi par hon.
+
+1) Server band karein, phir CMD:
+
+   cd /d D:\ArslansPharmacy
+   .venv\Scripts\activate.bat
+   python -c "from waitress import serve; from stocktime.wsgi import application; serve(application, host='0.0.0.0', port=8000, threads=8)"
+
+2) PC IP maloom karein:
+
+   ipconfig
+
+   IPv4 Address dekhein, example: 192.168.1.15
+
+3) Phone Chrome:
+
+   http://192.168.1.15:8000/
+
+4) Windows Firewall pehli baar Allow karein (port 8000).
+
+
+PART 7 — BACKUP (CMD)
+---------------------
+   cd /d D:\ArslansPharmacy
+   .venv\Scripts\activate.bat
+   python -c "import django,os; os.environ.setdefault('DJANGO_SETTINGS_MODULE','stocktime.settings'); django.setup(); from inventory.backup_utils import create_backup; print(create_backup('manual'))"
+
+Backups folder:
+
+   D:\ArslansPharmacy\backups\
+
+OR: windows\BACKUP_NOW.bat
+OR: App menu → More → System / Backup / Theme → Backup now
+
+
+PART 8 — VERIFY SYSTEM (CMD)
+----------------------------
+   cd /d D:\ArslansPharmacy
+   .venv\Scripts\activate.bat
+   python manage.py check
+   python manage.py verify_system
+
+OR: windows\VERIFY.bat
+
+
+PART 9 — UPDATE FROM GITHUB (JAB INTERNET HO)
+---------------------------------------------
+Agar Git installed hai:
+
+   cd /d D:\ArslansPharmacy
+   git pull
+   .venv\Scripts\activate.bat
+   python -m pip install -r requirements.txt
+   python manage.py migrate --noinput
+
+Bina Git: naya ZIP download karke extract (apna db.sqlite3 / backups mat mitaein).
+
+
+PART 10 — FIRST DAY SHOP SETUP (APP MENU)
+-----------------------------------------
+1) Login
+2) Shift → Open shift (opening float)
+3) More → System / Backup / Theme (shop name + theme + auto backup)
+4) Optional: Medicine Master → Preload Pakistan list
+5) Purchase / receive stock (catalog stock nahi banata)
+6) POS: F1 product help, F2 search, F9 hold, F12 pay
+7) More → System health / Stock movements
+
+
+PART 11 — COMMON ERRORS
+-----------------------
+python not recognized
+  → PATH + naya CMD / reinstall Python
+
+pip install fail / no internet
+  → Mobile hotspot on karke dubara:
+     .venv\Scripts\activate.bat
+     python -m pip install -r requirements.txt
+
+Port 8000 already in use
+  → windows\STOP.bat
+  → ya:
+     netstat -ano | findstr :8000
+     taskkill /F /PID <number>
+
+POS nahi khulta
+  → Pehle Shift open karein
+
+Login fail
+  → CREATE_ADMIN / createsuperuser dubara
+
+Page error after restore
+  → Server restart (Ctrl+C, START again)
+
+
+PART 12 — IMPORTANT PATHS
+-------------------------
+Project folder     : D:\ArslansPharmacy
+Virtual env        : D:\ArslansPharmacy\.venv
+Database           : D:\ArslansPharmacy\db.sqlite3  (name may vary)
+Backups            : D:\ArslansPharmacy\backups\
+This guide         : D:\ArslansPharmacy\INSTALL_GUIDE_COMPLETE.txt
+
+
+PART 13 — COPY-PASTE ALL-IN-ONE (FIRST INSTALL)
+-----------------------------------------------
+CMD mein poora block (path change karein agar zaroorat ho):
+
+cd /d D:\ArslansPharmacy
+python -m venv .venv
+call .venv\Scripts\activate.bat
+python -m pip install --upgrade pip wheel
+python -m pip install -r requirements.txt
+python manage.py migrate --noinput
+python manage.py createsuperuser
+python -c "from waitress import serve; from stocktime.wsgi import application; print('Open http://127.0.0.1:8000'); serve(application, host='127.0.0.1', port=8000, threads=8)"
+
+
+PART 14 — SECURITY NOTES
+------------------------
+- Default server 127.0.0.1 = sirf isi PC
+- 0.0.0.0 = LAN (same Wi-Fi phones)
+- Public internet par baghair password/HTTPS mat kholen
+- GitHub token / passwords share na karein
+- Roz backup lein
+
+
+================================================================================
+  END OF GUIDE — Arslan's Software Pharmacy ERP
+================================================================================
