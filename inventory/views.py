@@ -1,3 +1,5 @@
+from decimal import Decimal, InvalidOperation
+from django.conf import settings
 from django.shortcuts import render, get_object_or_404, redirect
 from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation, SupplierPurchase, SupplierPurchaseLine, SupplierPayment, CashbookEntry, MedicineMaster, AppNotification, CreditDue, StockAdjustment, PosShift, CustomerParty, SaleInvoice, AuditLog, SupplierReturn, PurchaseOrder, PurchaseOrderLine, MessageLog, AppSettings, StockMovement
 from datetime import timedelta
@@ -17,6 +19,8 @@ from django.contrib.auth.decorators import login_required, user_passes_test
 
 
 LOGIN_URL = 'login'
+CURRENCY_SYMBOL = getattr(settings, 'CURRENCY_SYMBOL', 'Rs.')
+CURRENCY_CODE = getattr(settings, 'CURRENCY_CODE', 'PKR')
 
 def home(request):
     products = Product.objects.filter(quantity__gt=0, expiry_date__gte=timezone.now().date())
