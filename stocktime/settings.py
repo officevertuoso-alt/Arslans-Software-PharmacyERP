@@ -87,6 +87,7 @@ WSGI_APPLICATION = 'stocktime.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
+        'OPTIONS': {'timeout': 30},
         'NAME': BASE_DIR / 'db.sqlite3',
         'OPTIONS': {
             'timeout': 30,  # help concurrent access a little
@@ -167,3 +168,13 @@ TWILIO_AUTH_TOKEN = os.environ.get('TWILIO_AUTH_TOKEN', '')
 TWILIO_SMS_FROM = os.environ.get('TWILIO_SMS_FROM', '')
 TWILIO_WHATSAPP_FROM = os.environ.get('TWILIO_WHATSAPP_FROM', '')
 MESSAGING_ENABLED = os.environ.get('MESSAGING_ENABLED', '0') == '1'
+
+
+# Local performance (SQLite + in-process cache)
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'arsalan-pharmacy',
+    }
+}
+SESSION_ENGINE = 'django.contrib.sessions.backends.cached_db'
