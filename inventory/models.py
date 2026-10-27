@@ -903,3 +903,47 @@ class AppSettings(models.Model):
 
     def __str__(self):
         return 'App settings'
+
+
+
+class StockMovement(models.Model):
+    """Immutable ledger of every stock quantity change for full sync/audit."""
+    MOVE_SALE = 'sale'
+    MOVE_SALE_VOID = 'sale_void'
+    MOVE_PURCHASE = 'purchase'
+    MOVE_RETURN_IN = 'return_in'
+    MOVE_RETURN_OUT = 'return_out'
+    MOVE_ADJUST = 'adjust'
+    MOVE_SUPPLIER_RETURN = 'supplier_return'
+    MOVE_OPENING = 'opening'
+    MOVE_CHOICES = [
+        (MOVE_SALE, 'Sale'),
+        (MOVE_SALE_VOID, 'Sale void restock'),
+        (MOVE_PURCHASE, 'Purchase / receive'),
+        (MOVE_RETURN_IN, 'Customer return'),
+        (MOVE_RETURN_OUT, 'Supplier return'),
+        (MOVE_ADJUST, 'Adjustment'),
+        (MOVE_SUPPLIER_RETURN, 'Supplier return'),
+        (MOVE_OPENING, 'Opening'),
+    ]
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='movements')
+    batch = models.ForeignKey(
+        'ProductBatch', on_delete=models.SET_NULL, null=True, blank=True, related_name='movements'
+    )
+    move_type = models.CharField(max_length=20, choices=MOVE_CHOICES)
+    quantity_delta = models.IntegerField(help_text='+in / -out')
+    quantity_after = models.IntegerField(default=0)
+    reference = models.CharField(max_length=64, blank=True, db_index=True)
+    notes = models.CharField(max_length=255, blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(fields=['product', '-created_at']),
+            models.Index(fields=['move_type', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.move_type} {self.quantity_delta} {self.product_id}'
