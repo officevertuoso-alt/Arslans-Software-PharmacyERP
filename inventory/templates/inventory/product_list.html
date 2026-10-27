@@ -43,7 +43,7 @@
             <div class="product-card-body">
                 <h3 class="product-name">{{ product.name }}</h3>
                 <p class="product-category">{{ product.category }}</p>
-                <p class="product-price">₱{{ product.price|floatformat:2 }}</p>
+                <p class="product-price">Rs.{{ product.price|floatformat:2 }}</p>
                 <p class="product-status status-{{ product.status|lower|slugify }}">{{ product.status }}</p>
                 <div class="product-actions">
                     <div class="action-row">
