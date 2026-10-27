@@ -136,6 +136,28 @@ def customer_product_list(request):
         'today': today
     })
 
+def post_cashbook(*, entry_type, amount, user=None, description='', reference='',
+                  payment_channel='cash', customer=None, supplier=None,
+                  expense_category=None, entry_date=None):
+    """Create a cashbook line. amount should already be signed (+ in, - out)."""
+    from decimal import Decimal as D
+    amount = D(str(amount)).quantize(D('0.01'))
+    return CashbookEntry.objects.create(
+        entry_type=entry_type,
+        amount=amount,
+        payment_channel=payment_channel or 'cash',
+        description=(description or '')[:255],
+        reference=(reference or '')[:64],
+        customer=customer,
+        supplier=supplier,
+        expense_category=expense_category,
+        created_by=user,
+        entry_date=entry_date or timezone.now().date(),
+    )
+
+
+
+
 @login_required
 def purchase_product(request, pk):
     if request.method == 'POST':
@@ -197,27 +219,6 @@ def checkout(request):
                 'quantity': quantity,
                 'total_cost': total_cost,
                 'currency': CURRENCY_SYMBOL,
-
-
-def post_cashbook(*, entry_type, amount, user=None, description='', reference='',
-                  payment_channel='cash', customer=None, supplier=None,
-                  expense_category=None, entry_date=None):
-    """Create a cashbook line. amount should already be signed (+ in, - out)."""
-    from decimal import Decimal as D
-    amount = D(str(amount)).quantize(D('0.01'))
-    return CashbookEntry.objects.create(
-        entry_type=entry_type,
-        amount=amount,
-        payment_channel=payment_channel or 'cash',
-        description=(description or '')[:255],
-        reference=(reference or '')[:64],
-        customer=customer,
-        supplier=supplier,
-        expense_category=expense_category,
-        created_by=user,
-        entry_date=entry_date or timezone.now().date(),
-    )
-
                 'profile': profile,
                 'change': None,
             })
@@ -2032,7 +2033,7 @@ def pos_pay(request):
     else:
         rx_number = rx_doctor = rx_patient = ''
 
-if credit_needed > 0 and not profile.can_take_credit(credit_needed):
+    if credit_needed > 0 and not profile.can_take_credit(credit_needed):
         messages.error(request, f"Credit limit exceeded. Available: {CURRENCY_SYMBOL}{profile.available_credit}.")
         return redirect('pos_screen')
 
@@ -2924,7 +2925,7 @@ def system_tools(request):
     return render(request, 'inventory/system_tools.html', {
         'cfg': cfg,
         'backups': backups,
-        'themes': AppSettings, StockMovement.THEME_CHOICES,
+        'themes': AppSettings.THEME_CHOICES,
     })
 
 
