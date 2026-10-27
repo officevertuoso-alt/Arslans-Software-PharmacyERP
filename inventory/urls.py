@@ -111,4 +111,7 @@ urlpatterns = [
     path('messaging/', views.messaging_center, name='messaging_center'),
 
     path('system/', views.system_tools, name='system_tools'),
+
+    path('stock-movements/', views.stock_movement_list, name='stock_movement_list'),
+    path('system/health/', views.system_health, name='system_health'),
 ]
