@@ -1,5 +1,5 @@
 from django.shortcuts import render, get_object_or_404, redirect
-from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation, SupplierPurchase, SupplierPurchaseLine, SupplierPayment, CashbookEntry, MedicineMaster, AppNotification, CreditDue, StockAdjustment, PosShift, CustomerParty, SaleInvoice, AuditLog, SupplierReturn, PurchaseOrder, PurchaseOrderLine, MessageLog, AppSettings
+from .models import Product, Purchase, Supplier, Return, CustomerProfile, CustomerPayment, ProductBatch, SaleBatchAllocation, SupplierPurchase, SupplierPurchaseLine, SupplierPayment, CashbookEntry, MedicineMaster, AppNotification, CreditDue, StockAdjustment, PosShift, CustomerParty, SaleInvoice, AuditLog, SupplierReturn, PurchaseOrder, PurchaseOrderLine, MessageLog, AppSettings, StockMovement
 from datetime import timedelta
 from django.utils import timezone
 from django.contrib import messages
@@ -2198,6 +2198,17 @@ if credit_needed > 0 and not profile.can_take_credit(credit_needed):
                 )
 
         _pos_save(request, [])
+        try:
+            from inventory.stock_sync import record_movement
+            for line in cart:
+                p = Product.objects.filter(pk=line['product_id']).first()
+                if p:
+                    record_movement(
+                        product=p, delta=-int(line['qty']), move_type='sale',
+                        user=request.user, reference=bill_number,
+                    )
+        except Exception:
+            pass
         messages.success(
             request,
             f"POS sale complete. Bill {bill_number} {CURRENCY_SYMBOL}{bill_total}. "
@@ -2311,6 +2322,8 @@ def stock_adjust(request):
                     notes=notes,
                     created_by=request.user,
                 )
+                from inventory.stock_sync import record_movement
+                record_movement(product=product, delta=product.quantity - before, move_type="adjust", user=request.user, notes=notes)
             messages.success(request, f'Adjusted {product.name}: {before} → {product.quantity}')
             return redirect('stock_adjust')
         except Exception as e:
@@ -2817,7 +2830,7 @@ def _maybe_send_bill_message(request, bill_number, phone, total, paid, credit):
 def system_tools(request):
     """Backup, restore, reset, theme, schedule."""
     from inventory.backup_utils import create_backup, list_backups, restore_backup, prune_backups, maybe_auto_backup
-    cfg = AppSettings.get()
+    cfg = AppSettings, StockMovement.get()
     # trigger schedule check on page load
     try:
         maybe_auto_backup()
@@ -2836,7 +2849,7 @@ def system_tools(request):
             return redirect('system_tools')
         if action == 'save_settings':
             cfg.theme = request.POST.get('theme') or 'pharmacy'
-            if cfg.theme not in dict(AppSettings.THEME_CHOICES):
+            if cfg.theme not in dict(AppSettings, StockMovement.THEME_CHOICES):
                 cfg.theme = 'pharmacy'
             cfg.shop_name = (request.POST.get('shop_name') or cfg.shop_name)[:120]
             cfg.backup_enabled = request.POST.get('backup_enabled') == '1'
@@ -2911,11 +2924,40 @@ def system_tools(request):
     return render(request, 'inventory/system_tools.html', {
         'cfg': cfg,
         'backups': backups,
-        'themes': AppSettings.THEME_CHOICES,
+        'themes': AppSettings, StockMovement.THEME_CHOICES,
     })
 
 
 # ensure datetime import used in system_tools - already have timezone
+
+@admin_required
+def stock_movement_list(request):
+    qs = StockMovement.objects.select_related('product', 'created_by')[:300]
+    return render(request, 'inventory/stock_movement_list.html', {'rows': qs})
+
+
+@admin_required
+def system_health(request):
+    """Quick integrity checks for lag-free ops."""
+    from django.db import connection
+    checks = []
+    checks.append(('products', Product.objects.count()))
+    checks.append(('purchases_sales', Purchase.objects.count()))
+    checks.append(('batches', ProductBatch.objects.count()))
+    checks.append(('movements', StockMovement.objects.count()))
+    checks.append(('cashbook', CashbookEntry.objects.count()))
+    checks.append(('invoices', SaleInvoice.objects.count()))
+    wal = '?'
+    try:
+        with connection.cursor() as c:
+            c.execute('PRAGMA journal_mode;')
+            wal = c.fetchone()[0]
+    except Exception as e:
+        wal = str(e)
+    return render(request, 'inventory/system_health.html', {
+        'checks': checks, 'wal': wal,
+    })
+
 def custom_404(request, exception=None):
     return render(request, 'inventory/404.html', status=404)
 
