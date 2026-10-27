@@ -319,3 +319,13 @@ If you add more strings, run on a machine with gettext:
 - Themes: light / dark / pharmacy green
 - Context processor + modern navbar/cards CSS
 - `/system/` tools page
+
+
+## [Phase 16] — 2026-10-27 — Windows standalone + speed + stock sync
+
+- `windows/INSTALL.bat` `START.bat` `STOP.bat` `BACKUP_NOW.bat` `VERIFY.bat`
+- Waitress 8-thread local server (lag-free vs runserver)
+- SQLite WAL + cache PRAGMAs on app ready
+- `StockMovement` ledger + `/stock-movements/`
+- System health check
+- Root `START_PHARMACY.bat` / `INSTALL_PHARMACY.bat`
