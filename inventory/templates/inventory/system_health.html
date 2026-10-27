@@ -1,0 +1,10 @@
+{% extends 'inventory/base.html' %}
+{% block title %}System health{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h2>System health</h2>
+  <p>SQLite journal mode: <code>{{ wal }}</code> (expect <strong>wal</strong>)</p>
+  <ul>{% for k,v in checks %}<li>{{ k }}: <strong>{{ v }}</strong></li>{% endfor %}</ul>
+  <a href="{% url 'system_tools' %}" class="btn btn-primary">System tools</a>
+</div>
+{% endblock %}
