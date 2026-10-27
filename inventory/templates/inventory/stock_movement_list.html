@@ -1,0 +1,24 @@
+{% extends 'inventory/base.html' %}
+{% block title %}Stock movements{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h2>Stock movement ledger</h2>
+  <p class="text-muted">Full sync trail of quantity changes</p>
+  <table class="table table-sm table-striped">
+    <thead><tr><th>When</th><th>Type</th><th>Product</th><th>Δ</th><th>After</th><th>Ref</th><th>User</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.created_at|date:"Y-m-d H:i:s" }}</td>
+        <td>{{ r.move_type }}</td>
+        <td>{{ r.product.name }}</td>
+        <td>{{ r.quantity_delta }}</td>
+        <td>{{ r.quantity_after }}</td>
+        <td>{{ r.reference }}</td>
+        <td>{{ r.created_by }}</td>
+      </tr>
+    {% empty %}<tr><td colspan="7">No movements yet</td></tr>{% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
